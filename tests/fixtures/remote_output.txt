@@ -1,0 +1,51 @@
+Willkommen auf webserver
+===SECTION os===
+24.04
+===SECTION apt_update===
+rc=0
+===SECTION upgradable===
+libssl3t64/noble-updates,noble-security 3.0.13-0ubuntu3.5 amd64 [upgradable from: 3.0.13-0ubuntu3.4]
+openssl/noble-updates,noble-security 3.0.13-0ubuntu3.5 amd64 [upgradable from: 3.0.13-0ubuntu3.4]
+tzdata/noble-updates 2025b-0ubuntu0.24.04.1 all [upgradable from: 2025a-0ubuntu0.24.04]
+libxml2/noble-infra-security 2.9.14+dfsg-1.3ubuntu3.1+esm1 amd64 [upgradable from: 2.9.14+dfsg-1.3ubuntu3.1]
+docker-ce/noble 5:28.1.1-1~ubuntu.24.04~noble amd64 [upgradable from: 5:28.0.4-1~ubuntu.24.04~noble]
+===SECTION sources===
+libssl3t64 openssl
+openssl openssl
+tzdata tzdata
+libxml2 libxml2
+docker-ce docker-ce
+===SECTION changelog openssl===
+openssl (3.0.13-0ubuntu3.5) noble-security; urgency=medium
+
+  * SECURITY UPDATE: Out-of-bounds read in HTTP client no_proxy handling
+    - debian/patches/CVE-2025-9232.patch: fix out-of-bounds read
+    - CVE-2025-9232
+  * SECURITY UPDATE: Timing side-channel in SM2 on ARM64
+    - debian/patches/CVE-2025-9231.patch: fix timing side-channel
+    - CVE-2025-9231
+
+ -- Ubuntu Security Team <security@ubuntu.com>  Tue, 30 Sep 2025 09:00:00 -0400
+
+openssl (3.0.13-0ubuntu3.4) noble-security; urgency=medium
+
+  * SECURITY UPDATE: Low-level invalid GF(2^m) parameters
+    - CVE-2024-9143
+
+ -- Ubuntu Security Team <security@ubuntu.com>  Mon, 04 Nov 2024 09:00:00 -0500
+===SECTION changelog tzdata===
+tzdata (2025b-0ubuntu0.24.04.1) noble; urgency=medium
+
+  * New upstream release.
+
+ -- Ubuntu Maintainer <maint@ubuntu.com>  Mon, 24 Mar 2025 10:00:00 +0100
+
+tzdata (2025a-0ubuntu0.24.04) noble; urgency=medium
+
+  * New upstream release.
+
+ -- Ubuntu Maintainer <maint@ubuntu.com>  Mon, 20 Jan 2025 10:00:00 +0100
+===SECTION changelog libxml2===
+===SECTION changelog docker-ce===
+===END===
+nach dem Ende ignoriert
