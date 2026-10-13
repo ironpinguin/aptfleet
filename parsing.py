@@ -85,6 +85,11 @@ def parse_sources(text: str) -> dict[str, str]:
     return mapping
 
 
+def parse_source_versions(text: str) -> dict[str, str]:
+    """Binärpaket → installierte Quellversion (dritte Spalte, falls vorhanden)."""
+    return {parts[0]: parts[2] for parts in map(str.split, text.splitlines()) if len(parts) > 2}
+
+
 @dataclass
 class ChangelogEntry:
     version: str
@@ -163,13 +168,19 @@ def build_host_report(host: str, raw_output: str, error: str | None = None) -> H
                 " – nutze vorhandenen Paket-Cache"
             )
 
+    if "timeout" in sections:
+        report.warnings.append(sections["timeout"].strip())
+
     upgrades, report.unparsed = parse_upgradable(sections.get("upgradable", ""))
     sources = parse_sources(sections.get("sources", ""))
+    source_versions = parse_source_versions(sections.get("sources", ""))
     for upgrade in upgrades:
         source = sources.get(upgrade.package, upgrade.package)
         changelog = sections.get(f"changelog {source}", "")
         if changelog.strip():
-            entries, uncertain = new_changelog_entries(changelog, upgrade.old_version)
+            # Changelog-Header tragen die Quellversion (z. B. grub2-signed 1.202 statt 1.202+2.12-…).
+            installed = source_versions.get(upgrade.package, upgrade.old_version)
+            entries, uncertain = new_changelog_entries(changelog, installed)
             available = True
         else:
             entries, uncertain, available = [], False, False

@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parsing import split_sections
+from parsing import build_host_report, split_sections
 from remote import REMOTE_SCRIPT, HostResult, build_ssh_command, run_all, run_host
 
 STUBS = {
@@ -20,8 +20,8 @@ echo "tzdata/noble-updates 2025b-0ubuntu0.24.04.1 all [upgradable from: 2025a-0u
 for arg in "$@"; do
   case "$arg" in -*) continue ;; esac
   case "$arg" in
-    libssl3t64|openssl) echo "$arg openssl" ;;
-    *) echo "$arg $arg" ;;
+    libssl3t64|openssl) echo "$arg openssl 3.0.13-0ubuntu3.4" ;;
+    *) echo "$arg $arg 1.0" ;;
   esac
 done
 """,
@@ -78,7 +78,7 @@ class RemoteScriptTest(unittest.TestCase):
         self.assertEqual(len(sections["upgradable"].splitlines()), 3)
         self.assertEqual(
             sections["sources"].splitlines(),
-            ["libssl3t64 openssl", "openssl openssl", "tzdata tzdata"],
+            ["libssl3t64 openssl 3.0.13-0ubuntu3.4", "openssl openssl 3.0.13-0ubuntu3.4", "tzdata tzdata 1.0"],
         )
         changelogs = sorted(k for k in sections if k.startswith("changelog "))
         self.assertEqual(changelogs, ["changelog openssl", "changelog tzdata"])
@@ -95,6 +95,10 @@ class RemoteScriptTest(unittest.TestCase):
 
     def test_forces_c_locale(self):
         self.assertIn("export LC_ALL=C", REMOTE_SCRIPT)
+
+    def test_bounds_apt_update_and_changelog_time(self):
+        self.assertIn("timeout 90 sudo -n apt-get update", REMOTE_SCRIPT)
+        self.assertIn("timeout 20 apt-get changelog", REMOTE_SCRIPT)
 
 
 def fake_runner(stdout="", stderr="", returncode=0, exc=None):
@@ -150,6 +154,36 @@ class RunHostTest(unittest.TestCase):
         runner = fake_runner(exc=subprocess.TimeoutExpired(cmd="ssh", timeout=30))
         result = run_host("pdf-ansible", "/x/cfg", True, [], 30, runner=runner)
         self.assertEqual(result.error, "ssh timeout nach 30s")
+
+    def test_timeout_keeps_partial_output_once_package_list_is_complete(self):
+        partial = (
+            "===SECTION upgradable===\n"
+            "tzdata/noble-updates 2025b-0ubuntu0.24.04.1 all [upgradable from: 2025a-0ubuntu0.24.04]\n"
+            "===SECTION sources===\ntzdata tzdata 2025a-0ubuntu0.24.04\n"
+            "===SECTION changelog tzdata===\n"
+        )
+        runner = fake_runner(exc=subprocess.TimeoutExpired(cmd="ssh", timeout=30, output=partial))
+        result = run_host("git-ansible", "/x/cfg", True, [], 30, runner=runner)
+        self.assertTrue(result.ok)
+        report = build_host_report(result.host, result.raw_output, result.error)
+        self.assertEqual([p.upgrade.package for p in report.packages], ["tzdata"])
+        self.assertEqual(report.warnings, ["Timeout nach 30s – Changelogs unvollständig"])
+
+    def test_timeout_before_package_list_is_an_error(self):
+        runner = fake_runner(
+            exc=subprocess.TimeoutExpired(cmd="ssh", timeout=30, output="===SECTION upgradable===\nfoo/x 1 all [u: 0]\n")
+        )
+        result = run_host("git-ansible", "/x/cfg", True, [], 30, runner=runner)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error, "ssh timeout nach 30s")
+
+    def test_non_utf8_output_does_not_crash(self):
+        def runner(cmd, **kwargs):
+            return subprocess.run(["printf", "caf\\351\\n===END===\\n"], **kwargs)
+
+        result = run_host("git-ansible", "/x/cfg", True, [], 30, runner=runner)
+        self.assertTrue(result.ok)
+        self.assertIn("caf\ufffd", result.raw_output)
 
     def test_incomplete_output(self):
         runner = fake_runner(stdout="===SECTION os===\n24.04\n")

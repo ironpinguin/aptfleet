@@ -240,6 +240,21 @@ class BuildHostReportTest(unittest.TestCase):
         self.assertIsNone(report.os_version)
         self.assertEqual(report.packages, [])
 
+    def test_matches_changelog_on_installed_source_version(self):
+        raw = (
+            "===SECTION upgradable===\n"
+            "grub-efi-amd64-signed/noble-security 1.203+2.12-1ubuntu7.4 amd64 "
+            "[upgradable from: 1.202+2.12-1ubuntu7.3]\n"
+            "===SECTION sources===\ngrub-efi-amd64-signed grub2-signed 1.202\n"
+            "===SECTION changelog grub2-signed===\n"
+            "grub2-signed (1.203) noble-security; urgency=medium\n\n  * Fix CVE-2025-0002.\n\n -- A <a@b>  date\n\n"
+            "grub2-signed (1.202) noble; urgency=medium\n\n  * Fix CVE-2025-0001.\n\n -- A <a@b>  date\n"
+            "===END===\n"
+        )
+        pkg = build_host_report("rootserver-ansible", raw).packages[0]
+        self.assertFalse(pkg.changelog_uncertain)
+        self.assertEqual(pkg.cves, ["CVE-2025-0002"])
+
     def test_unparsed_lines_are_collected(self):
         raw = "===SECTION upgradable===\nquatsch\n===END===\n"
         report = build_host_report("git-ansible", raw)

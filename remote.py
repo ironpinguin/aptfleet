@@ -10,6 +10,7 @@ from pathlib import Path
 from parsing import END_MARKER
 
 MAX_WORKERS = 6
+SOURCES_MARKER = "===SECTION sources==="
 CONNECT_TIMEOUT = 15
 
 # Wird per stdin an `bash -s -- <refresh 0|1> [paket ...]` übergeben; legt nichts auf dem Host ab.
@@ -25,7 +26,7 @@ echo "===SECTION os==="
 
 if [ "$REFRESH" = "1" ]; then
   echo "===SECTION apt_update==="
-  out=$(sudo -n apt-get update -qq </dev/null 2>&1)
+  out=$(timeout 90 sudo -n apt-get update -qq </dev/null 2>&1)
   rc=$?
   echo "rc=$rc"
   [ -n "$out" ] && printf '%s\n' "$out"
@@ -51,13 +52,13 @@ done < <(apt list --upgradable </dev/null 2>/dev/null)
 
 srcmap=""
 if [ -n "$pkgs" ]; then
-  srcmap=$(dpkg-query -W -f='${Package} ${source:Package}\n' $pkgs </dev/null 2>/dev/null)
+  srcmap=$(dpkg-query -W -f='${Package} ${source:Package} ${source:Version}\n' $pkgs </dev/null 2>/dev/null)
 fi
 echo "===SECTION sources==="
 [ -n "$srcmap" ] && printf '%s\n' "$srcmap"
 
 seen=" "
-while read -r bin src; do
+while read -r bin src _srcver; do
   [ -n "$bin" ] || continue
   src="${src:-$bin}"
   case "$seen" in
@@ -65,7 +66,7 @@ while read -r bin src; do
   esac
   seen="$seen$src "
   echo "===SECTION changelog $src==="
-  timeout 60 apt-get changelog -qq "$bin" </dev/null 2>/dev/null | head -n 500
+  timeout 20 apt-get changelog -qq "$bin" </dev/null 2>/dev/null | head -n 500
 done <<< "$srcmap"
 
 echo "===END==="
@@ -103,8 +104,22 @@ def run_host(
 ) -> HostResult:
     cmd = build_ssh_command(host, ssh_config, refresh, packages)
     try:
-        proc = runner(cmd, input=REMOTE_SCRIPT, capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
+        proc = runner(
+            cmd,
+            input=REMOTE_SCRIPT,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        partial = exc.stdout or ""
+        if isinstance(partial, bytes):
+            partial = partial.decode("utf-8", errors="replace")
+        # Paketliste ist vollständig, nur Changelogs fehlen: Teilergebnis statt Fehler.
+        if SOURCES_MARKER in partial:
+            note = f"\n===SECTION timeout===\nTimeout nach {timeout}s – Changelogs unvollständig\n"
+            return HostResult(host, True, None, partial + note)
         return HostResult(host, False, f"ssh timeout nach {timeout}s", "")
     except OSError as exc:
         return HostResult(host, False, f"ssh nicht ausführbar: {exc}", "")
