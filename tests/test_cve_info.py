@@ -9,6 +9,7 @@ from pathlib import Path
 from cve_info import (
     CACHE_TTL_SECONDS,
     CveInfo,
+    build_ssl_context,
     lookup_cves,
     parse_cve_json,
     priority_rank,
@@ -103,6 +104,43 @@ class LookupCvesTest(unittest.TestCase):
         fetch = FakeFetch()
         self.assertEqual(lookup_cves([], self.cache, fetch, now=1.0), ({}, []))
         self.assertEqual(fetch.calls, [])
+
+
+class FakeContext:
+    def __init__(self, ca_count: int):
+        self.ca_count = ca_count
+        self.loaded: list[str] = []
+
+    def cert_store_stats(self):
+        return {"x509": self.ca_count, "crl": 0, "x509_ca": self.ca_count}
+
+    def load_verify_locations(self, cafile=None):
+        self.loaded.append(cafile)
+
+
+class BuildSslContextTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.cafile = Path(self._tmp.name) / "cert.pem"
+        self.cafile.write_text("dummy")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_loads_system_cas_when_python_has_none(self):
+        ctx = FakeContext(0)
+        self.assertIs(build_ssl_context(self.cafile, factory=lambda: ctx), ctx)
+        self.assertEqual(ctx.loaded, [str(self.cafile)])
+
+    def test_keeps_existing_cas(self):
+        ctx = FakeContext(120)
+        build_ssl_context(self.cafile, factory=lambda: ctx)
+        self.assertEqual(ctx.loaded, [])
+
+    def test_missing_fallback_file_is_ignored(self):
+        ctx = FakeContext(0)
+        build_ssl_context(Path(self._tmp.name) / "fehlt.pem", factory=lambda: ctx)
+        self.assertEqual(ctx.loaded, [])
 
 
 if __name__ == "__main__":

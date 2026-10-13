@@ -1,8 +1,10 @@
 """CVE-Priorität und -Beschreibung über die Ubuntu-Security-API, mit lokalem Cache."""
 from __future__ import annotations
 
+import functools
 import http.client
 import json
+import ssl
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -15,6 +17,7 @@ CACHE_TTL_SECONDS = 7 * 24 * 3600
 FETCH_TIMEOUT = 10
 MAX_WORKERS = 8
 DESCRIPTION_MAX = 200
+SYSTEM_CA_FILE = Path("/etc/ssl/cert.pem")
 PRIORITY_ORDER = ["critical", "high", "medium", "low", "negligible"]
 
 
@@ -48,8 +51,22 @@ def parse_cve_json(cve_id: str, data: dict) -> CveInfo:
     )
 
 
+def build_ssl_context(fallback_cafile: Path = SYSTEM_CA_FILE, factory=ssl.create_default_context):
+    """Python von python.org bringt unter macOS keine CA-Zertifikate mit; dann System-CAs laden."""
+    context = factory()
+    if context.cert_store_stats()["x509_ca"] == 0 and fallback_cafile.exists():
+        context.load_verify_locations(cafile=str(fallback_cafile))
+    return context
+
+
+@functools.lru_cache(maxsize=1)
+def _default_ssl_context() -> ssl.SSLContext:
+    return build_ssl_context()
+
+
 def fetch_cve(cve_id: str) -> CveInfo:
-    with urllib.request.urlopen(API_URL.format(cve_id=cve_id), timeout=FETCH_TIMEOUT) as resp:
+    url = API_URL.format(cve_id=cve_id)
+    with urllib.request.urlopen(url, timeout=FETCH_TIMEOUT, context=_default_ssl_context()) as resp:
         return parse_cve_json(cve_id, json.load(resp))
 
 
