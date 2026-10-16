@@ -82,27 +82,34 @@ class HostResult:
 
 
 def build_ssh_command(
-    host: str, ssh_config: Path | str, refresh: bool, packages: list[str]
+    host: str,
+    ssh_config: Path | str | None,
+    refresh: bool,
+    packages: list[str],
+    user: str | None = None,
 ) -> list[str]:
+    """Ohne ssh_config greift die normale ~/.ssh/config; user setzt den Login-Namen."""
     args = ["1" if refresh else "0", *packages]
     remote_cmd = "bash -s -- " + " ".join(shlex.quote(arg) for arg in args)
-    return [
-        "ssh", "-F", str(ssh_config),
-        "-o", "BatchMode=yes",
-        "-o", f"ConnectTimeout={CONNECT_TIMEOUT}",
-        host, remote_cmd,
-    ]
+    cmd = ["ssh"]
+    if ssh_config is not None:
+        cmd += ["-F", str(ssh_config)]
+    cmd += ["-o", "BatchMode=yes", "-o", f"ConnectTimeout={CONNECT_TIMEOUT}"]
+    if user:
+        cmd += ["-l", user]
+    return [*cmd, host, remote_cmd]
 
 
 def run_host(
     host: str,
-    ssh_config: Path | str,
+    ssh_config: Path | str | None,
     refresh: bool,
     packages: list[str],
     timeout: int,
     runner=subprocess.run,
+    user: str | None = None,
 ) -> HostResult:
-    cmd = build_ssh_command(host, ssh_config, refresh, packages)
+    cmd = build_ssh_command(host, ssh_config, refresh, packages, user)
     try:
         proc = runner(
             cmd,
@@ -135,16 +142,17 @@ def run_host(
 
 def run_all(
     hosts: list[str],
-    ssh_config: Path | str,
+    ssh_config: Path | str | None,
     refresh: bool,
     packages: list[str],
     timeout: int,
     max_workers: int = MAX_WORKERS,
     runner=subprocess.run,
+    user: str | None = None,
 ) -> list[HostResult]:
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = [
-            pool.submit(run_host, host, ssh_config, refresh, packages, timeout, runner)
+            pool.submit(run_host, host, ssh_config, refresh, packages, timeout, runner, user)
             for host in hosts
         ]
         return [future.result() for future in futures]

@@ -51,7 +51,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         "2 = mindestens ein Host nicht erreichbar.",
     )
     parser.add_argument("--host", action="append", default=[], metavar="NAME",
-                        help="nur diesen Host prüfen (Name aus virtualhosts, mehrfach möglich)")
+                        help="nur diesen Host prüfen (Name aus virtualhosts, mehrfach möglich; "
+                        "mit --user beliebiger Hostname/IP)")
+    parser.add_argument("--user", metavar="NAME",
+                        help="SSH-User für --host; nutzt die Hosts direkt ohne virtualhosts "
+                        "und ohne Repo-SSH-Config (es gilt ~/.ssh/config)")
     parser.add_argument("--security-only", action="store_true", help="nur Security-Updates anzeigen")
     parser.add_argument("--details", action="store_true", help="neue Changelog-Einträge anzeigen")
     parser.add_argument("--package", action="append", default=[], metavar="NAME",
@@ -73,13 +77,26 @@ def main(
 ) -> int:
     stdout = stdout or sys.stdout
     args = parse_args(argv)
-    try:
-        hosts = select_hosts(read_inventory(inventory), args.host)
-    except ValueError as exc:
-        print(f"Fehler: {exc}", file=sys.stderr)
-        return 2
+    if args.user:
+        if not args.host:
+            print("Fehler: --user benötigt mindestens ein --host", file=sys.stderr)
+            return 2
+        hosts, ssh_config = list(dict.fromkeys(args.host)), None
+    else:
+        try:
+            hosts = select_hosts(read_inventory(inventory), args.host)
+        except OSError as exc:
+            print(f"Fehler: Inventory nicht lesbar ({exc}); alternativ --host und --user angeben",
+                  file=sys.stderr)
+            return 2
+        except ValueError as exc:
+            print(f"Fehler: {exc}", file=sys.stderr)
+            return 2
+        ssh_config = SSH_CONFIG
 
-    results = run_all(hosts, SSH_CONFIG, not args.no_refresh, args.package, args.timeout)
+    results = run_all(
+        hosts, ssh_config, not args.no_refresh, args.package, args.timeout, user=args.user
+    )
     reports = [build_host_report(r.host, r.raw_output, r.error) for r in results]
 
     cve_ids = {cve for report in reports for p in report.packages for cve in p.cves}

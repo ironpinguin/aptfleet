@@ -127,6 +127,16 @@ class BuildSshCommandTest(unittest.TestCase):
         cmd = build_ssh_command("git-ansible", "/x/cfg", True, [])
         self.assertEqual(cmd[-1], "bash -s -- 1")
 
+    def test_direct_host_with_user_and_without_config(self):
+        cmd = build_ssh_command("10.0.0.5", None, True, [], user="admin")
+        self.assertEqual(
+            cmd,
+            [
+                "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15",
+                "-l", "admin", "10.0.0.5", "bash -s -- 1",
+            ],
+        )
+
 
 class RunHostTest(unittest.TestCase):
     def test_success(self):
@@ -204,6 +214,16 @@ class RunAllTest(unittest.TestCase):
         self.assertEqual([r.host for r in results], ["a", "b", "c"])
         self.assertEqual([r.ok for r in results], [True, False, True])
         self.assertEqual(results[1].error, "ssh nicht ausführbar: ssh nicht gefunden")
+
+    def test_passes_user_to_ssh(self):
+        calls = []
+
+        def runner(cmd, **kwargs):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, "===END===\n", "")
+
+        run_all(["a"], None, False, [], 30, user="admin", runner=runner)
+        self.assertEqual(calls[0][-3:], ["admin", "a", "bash -s -- 0"])
 
 
 if __name__ == "__main__":

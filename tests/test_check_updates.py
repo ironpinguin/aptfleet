@@ -66,12 +66,14 @@ class MainTest(unittest.TestCase):
         self.inventory.write_text(INVENTORY_TEXT)
         self.run_calls = []
         self.lookup_calls = []
+        self.users = []
 
     def tearDown(self):
         self._tmp.cleanup()
 
-    def fake_run_all(self, hosts, ssh_config, refresh, packages, timeout):
+    def fake_run_all(self, hosts, ssh_config, refresh, packages, timeout, user=None):
         self.run_calls.append((hosts, ssh_config, refresh, packages, timeout))
+        self.users.append(user)
         raw = (FIXTURES / "remote_output.txt").read_text()
         return [
             HostResult(h, False, "ssh timeout nach 120s", "") if h == "pdf-ansible" else HostResult(h, True, None, raw)
@@ -121,8 +123,32 @@ class MainTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(self.run_calls, [])
 
+    def test_user_mode_uses_hosts_directly_without_inventory(self):
+        self.inventory = Path(self._tmp.name) / "gibtsnicht"
+        code, _ = self.run_main("--user", "admin", "--host", "10.0.0.5", "--host", "web.example.org")
+        self.assertEqual(code, 1)
+        hosts, ssh_config, *_ = self.run_calls[0]
+        self.assertEqual(hosts, ["10.0.0.5", "web.example.org"])
+        self.assertIsNone(ssh_config)
+        self.assertEqual(self.users, ["admin"])
+
+    def test_user_mode_requires_host(self):
+        code, _ = self.run_main("--user", "admin")
+        self.assertEqual(code, 2)
+        self.assertEqual(self.run_calls, [])
+
+    def test_inventory_mode_passes_no_user(self):
+        self.run_main("--host", "webserver-ansible")
+        self.assertEqual(self.users, [None])
+
+    def test_missing_inventory_returns_2(self):
+        self.inventory = Path(self._tmp.name) / "gibtsnicht"
+        code, _ = self.run_main()
+        self.assertEqual(code, 2)
+        self.assertEqual(self.run_calls, [])
+
     def test_no_cves_skips_lookup(self):
-        def run_all(hosts, *args):
+        def run_all(hosts, *args, **kwargs):
             return [HostResult(h, True, None, "===SECTION upgradable===\n===END===\n") for h in hosts]
 
         code = main([], inventory=self.inventory, run_all=run_all, lookup=self.fake_lookup, stdout=io.StringIO())
