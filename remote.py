@@ -13,6 +13,20 @@ MAX_WORKERS = 6
 SOURCES_MARKER = "===SECTION sources==="
 CONNECT_TIMEOUT = 15
 
+# Bash-Fragment: liest "<paket> <version>"-Zeilen von stdin und gibt die davon aus Ubuntu-Origins
+# (apt-Listen mit "Origin: Ubuntu") stammenden Paare aus. POSIX-awk, mawk-kompatibel.
+ORIGINS_SNIPPET = r"""lists="${APT_LISTS:-/var/lib/apt/lists}"
+files=""
+for rel in "$lists"/*_InRelease "$lists"/*_Release; do
+  [ -f "$rel" ] || continue
+  grep -q '^Origin: Ubuntu' "$rel" || continue
+  prefix="${rel%InRelease}"; prefix="${prefix%Release}"
+  for f in "$prefix"*_Packages; do [ -f "$f" ] && files="$files $f"; done
+done
+awk 'FNR==NR { want[$1" "$2]=1; next }
+     /^Package: / { p=$2 }
+     /^Version: / { k=p" "$2; if ((k in want) && !(k in seen)) { print k; seen[k]=1 } }' - $files"""
+
 # Wird per stdin an `bash -s -- <refresh 0|1> [paket ...]` übergeben; legt nichts auf dem Host ab.
 # Alle Befehle bekommen </dev/null, damit sie nicht den Rest des Skripts von stdin lesen.
 REMOTE_SCRIPT = r"""
@@ -22,7 +36,7 @@ shift || true
 FILTER=" $* "
 
 echo "===SECTION os==="
-( . /etc/os-release 2>/dev/null && echo "${VERSION_ID:-}" )
+( . /etc/os-release 2>/dev/null && echo "${VERSION_ID:-}" && echo "${VERSION_CODENAME:-}" )
 
 if [ "$REFRESH" = "1" ]; then
   echo "===SECTION apt_update==="
@@ -54,6 +68,19 @@ srcmap=""
 if [ -n "$pkgs" ]; then
   srcmap=$(dpkg-query -W -f='${Package} ${source:Package} ${source:Version}\n' $pkgs </dev/null 2>/dev/null)
 fi
+echo "===SECTION installed==="
+installed=$(dpkg-query -W -f='${db:Status-Abbrev} ${Package} ${Version} ${source:Package} ${source:Version}\n' </dev/null 2>/dev/null)
+[ -n "$installed" ] && printf '%s\n' "$installed"
+
+echo "===SECTION kernel==="
+uname -r </dev/null 2>/dev/null
+
+echo "===SECTION origins==="
+# stdin kommt hier ausdrücklich aus der Pipe, nicht aus dem Skript-stdin.
+printf '%s\n' "$installed" | awk '$1=="ii"{print $2" "$3}' | {
+@@ORIGINS_SNIPPET@@
+}
+
 echo "===SECTION sources==="
 [ -n "$srcmap" ] && printf '%s\n' "$srcmap"
 
@@ -70,7 +97,7 @@ while read -r bin src _srcver; do
 done <<< "$srcmap"
 
 echo "===END==="
-"""
+""".replace("@@ORIGINS_SNIPPET@@", ORIGINS_SNIPPET)
 
 
 @dataclass

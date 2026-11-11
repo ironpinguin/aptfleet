@@ -18,6 +18,15 @@ echo "tzdata/noble-updates 2025b-0ubuntu0.24.04.1 all [upgradable from: 2025a-0u
 """,
     "dpkg-query": """#!/bin/sh
 for arg in "$@"; do
+  case "$arg" in
+    -f='${db:Status-Abbrev}'*)
+      echo "ii  openssl 3.0.13-0ubuntu3.4 openssl 3.0.13-0ubuntu3.4"
+      echo "ii  docker-ce 5:28.0.4-1 docker-ce 5:28.0.4-1"
+      echo "rc  oldpkg 1.0 oldpkg 1.0"
+      exit 0 ;;
+  esac
+done
+for arg in "$@"; do
   case "$arg" in -*) continue ;; esac
   case "$arg" in
     libssl3t64|openssl) echo "$arg openssl 3.0.13-0ubuntu3.4" ;;
@@ -37,7 +46,28 @@ exec "$@"
 shift
 exec "$@"
 """,
+    "uname": """#!/bin/sh
+echo "6.8.0-45-generic"
+""",
 }
+
+PACKAGES_STANZA = "Package: {p}\nVersion: {v}\nArchitecture: amd64\n\n"
+
+
+def make_apt_lists(root: Path) -> None:
+    files = {
+        "archive.ubuntu.com_ubuntu_dists_noble_InRelease": "Origin: Ubuntu\nSuite: noble\n",
+        "archive.ubuntu.com_ubuntu_dists_noble_main_binary-amd64_Packages": PACKAGES_STANZA.format(
+            p="openssl", v="3.0.13-0ubuntu3.4"
+        ),
+        "download.docker.com_linux_ubuntu_dists_noble_InRelease": "Origin: Docker\nSuite: noble\n",
+        "download.docker.com_linux_ubuntu_dists_noble_stable_binary-amd64_Packages": PACKAGES_STANZA.format(
+            p="docker-ce", v="5:28.0.4-1"
+        ),
+        "archive.ubuntu.com_ubuntu_dists_noble-updates_InRelease": "Origin: Ubuntu\nSuite: noble-updates\n",
+    }
+    for name, content in files.items():
+        (root / name).write_text(content)
 
 
 class RemoteScriptTest(unittest.TestCase):
@@ -46,6 +76,9 @@ class RemoteScriptTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.stub_dir = Path(self._tmp.name)
+        self._lists = tempfile.TemporaryDirectory()
+        self.lists_dir = Path(self._lists.name)
+        make_apt_lists(self.lists_dir)
         for name, content in STUBS.items():
             path = self.stub_dir / name
             path.write_text(content)
@@ -53,6 +86,7 @@ class RemoteScriptTest(unittest.TestCase):
 
     def tearDown(self):
         self._tmp.cleanup()
+        self._lists.cleanup()
 
     def run_script(self, *args: str) -> str:
         proc = subprocess.run(
@@ -60,7 +94,11 @@ class RemoteScriptTest(unittest.TestCase):
             input=REMOTE_SCRIPT,
             capture_output=True,
             text=True,
-            env={"PATH": f"{self.stub_dir}:/usr/bin:/bin", "LANG": "de_DE.UTF-8"},
+            env={
+                "PATH": f"{self.stub_dir}:/usr/bin:/bin",
+                "LANG": "de_DE.UTF-8",
+                "APT_LISTS": str(self.lists_dir),
+            },
             timeout=30,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -92,6 +130,30 @@ class RemoteScriptTest(unittest.TestCase):
             "tzdata/noble-updates 2025b-0ubuntu0.24.04.1 all [upgradable from: 2025a-0ubuntu0.24.04]",
         )
         self.assertEqual(sorted(k for k in sections if k.startswith("changelog ")), ["changelog tzdata"])
+
+    def test_new_sections(self):
+        sections = split_sections(self.run_script("1"))
+        self.assertEqual(sections["kernel"], "6.8.0-45-generic")
+        self.assertIn("openssl 3.0.13-0ubuntu3.4 openssl", sections["installed"])
+        self.assertEqual(sections["origins"].splitlines(), ["openssl 3.0.13-0ubuntu3.4"])
+
+    def test_new_sections_come_before_sources(self):
+        out = self.run_script("1")
+        for name in ("installed", "kernel", "origins"):
+            self.assertLess(out.index(f"===SECTION {name}==="), out.index("===SECTION sources==="))
+
+    def test_package_filter_does_not_limit_installed(self):
+        sections = split_sections(self.run_script("0", "tzdata"))
+        self.assertIn("openssl", sections["installed"])
+
+    def test_os_prints_codename(self):
+        self.assertIn("VERSION_CODENAME", REMOTE_SCRIPT)
+
+    def test_origins_without_lists_is_empty(self):
+        for f in self.lists_dir.iterdir():
+            f.unlink()
+        sections = split_sections(self.run_script("1"))
+        self.assertEqual(sections["origins"], "")
 
     def test_forces_c_locale(self):
         self.assertIn("export LC_ALL=C", REMOTE_SCRIPT)
