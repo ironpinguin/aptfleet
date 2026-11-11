@@ -10,6 +10,7 @@ from pathlib import Path
 from kev import (
     CACHE_TTL_SECONDS,
     KevData,
+    KevEntry,
     load_kev,
     parse_kev_json,
     recent_entries,
@@ -72,6 +73,17 @@ class KevTest(unittest.TestCase):
         self.assertIsNone(load_kev(self.cache, fetch=lambda: {"foo": 1}, now=0.0))
         self.assertFalse(self.cache.exists())
 
+    def test_empty_list_counts_as_failure_and_is_not_cached(self):
+        for feed in ({"vulnerabilities": []}, {"vulnerabilities": [{"cveID": ""}, "x"]}):
+            self.assertIsNone(load_kev(self.cache, fetch=lambda feed=feed: feed, now=0.0))
+        self.assertFalse(self.cache.exists())
+
+    def test_empty_list_falls_back_to_stale_cache(self):
+        load_kev(self.cache, fetch=lambda: self.sample, now=0.0)
+        kev = load_kev(self.cache, fetch=lambda: {"vulnerabilities": []}, now=CACHE_TTL_SECONDS * 2)
+        self.assertTrue(kev.stale)
+        self.assertIn("CVE-2024-6387", kev.entries)
+
     def test_corrupt_cache_is_ignored(self):
         self.cache.write_text("{kaputt")
         kev = load_kev(self.cache, fetch=lambda: self.sample, now=0.0)
@@ -82,6 +94,20 @@ class KevTest(unittest.TestCase):
         recent = recent_entries(kev, 7, datetime.date(2026, 11, 11))
         self.assertEqual([e.cve_id for e in recent], ["CVE-2024-6387", "CVE-2026-5020"])
         self.assertEqual(recent_entries(kev, 1, datetime.date(2026, 11, 11)), [])
+
+    def test_recent_entries_covers_exactly_n_calendar_days(self):
+        def entry(cve_id, date):
+            return KevEntry(cve_id, "v", "p", "n", date)
+
+        kev = KevData(
+            {e.cve_id: e for e in [entry("CVE-1", "2026-11-04"), entry("CVE-2", "2026-11-05"),
+                                   entry("CVE-3", "2026-11-11"), entry("CVE-4", "2026-11-10")]},
+            0.0,
+            False,
+        )
+        today = datetime.date(2026, 11, 11)
+        self.assertEqual([e.cve_id for e in recent_entries(kev, 7, today)], ["CVE-3", "CVE-4", "CVE-2"])
+        self.assertEqual([e.cve_id for e in recent_entries(kev, 1, today)], ["CVE-3"])
 
 
 if __name__ == "__main__":

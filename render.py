@@ -204,7 +204,8 @@ def _summary(reports: list[HostReport], kev: dict[str, KevEntry]) -> str:
 
 
 def _kev_recent_lines(reports: list[HostReport], entries: list[KevEntry], days: int) -> list[str]:
-    lines = [f"Neu auf CISA KEV (letzte {days} Tage):"]
+    period = "letzter Tag" if days == 1 else f"letzte {days} Tage"
+    lines = [f"Neu auf CISA KEV ({period}):"]
     if not entries:
         lines.append("  (keine)")
         return lines

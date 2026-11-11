@@ -34,7 +34,9 @@ class KevData:
 
 
 def parse_kev_json(data: dict) -> dict[str, KevEntry]:
-    """Wandelt den KEV-Feed in Einträge um; Einträge ohne gültige cveID werden übersprungen."""
+    """Wandelt den KEV-Feed in Einträge um; Einträge ohne gültige cveID werden übersprungen.
+
+    Ein Feed ohne gültige Einträge gilt als Fehler (ValueError)."""
     vulnerabilities = data.get("vulnerabilities") if isinstance(data, dict) else None
     if not isinstance(vulnerabilities, list):
         raise ValueError("KEV-Feed ohne Liste 'vulnerabilities'")
@@ -53,6 +55,8 @@ def parse_kev_json(data: dict) -> dict[str, KevEntry]:
             name=str(item.get("vulnerabilityName") or ""),
             date_added=str(item.get("dateAdded") or ""),
         )
+    if not entries:
+        raise ValueError("KEV-Feed ohne gültige Einträge")
     return entries
 
 
@@ -114,9 +118,9 @@ def load_kev(
 
 
 def recent_entries(kev: KevData, days: int, today: datetime.date) -> list[KevEntry]:
-    """Einträge der letzten `days` Tage, neueste zuerst, dann nach CVE-ID."""
+    """Einträge der letzten `days` Kalendertage inkl. heute, neueste zuerst, dann nach CVE-ID."""
     cutoff = (today - datetime.timedelta(days=days)).isoformat()
-    recent = [e for e in kev.entries.values() if e.date_added >= cutoff]
+    recent = [e for e in kev.entries.values() if e.date_added > cutoff]
     recent.sort(key=lambda e: e.cve_id)
     recent.sort(key=lambda e: e.date_added, reverse=True)  # stabil: CVE-ID bleibt Tiebreaker
     return recent

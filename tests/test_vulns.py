@@ -192,10 +192,28 @@ class FindOpenVulnsTest(unittest.TestCase):
         v = find_open_vulns(r, oval, set())
         self.assertEqual((v[0].source, v[0].binaries), ("linux-hwe-6.8", ["linux-image-unsigned-6.8.0-45-generic"]))
 
-    def test_kernel_image_without_ubuntu_origin_ignored(self):
+    def test_kernel_image_without_ubuntu_origin_is_checked(self):
+        # Ubuntu entfernt alte Kernel-ABI-Pakete aus den Indizes; der laufende Kernel zählt trotzdem.
         r = host([pkg("linux-image-6.8.0-45-generic", "6.8.0-45.45", "linux-signed")], kernel="6.8.0-45-generic")
         r.ubuntu_origin = set()
         oval = {"CVE-K": cve("CVE-K", "high", kernels={"linux": None})}
+        v = find_open_vulns(r, oval, set())
+        self.assertEqual([(x.cve_id, x.is_kernel) for x in v], [("CVE-K", True)])
+
+    def test_superseded_ubuntu_version_is_checked(self):
+        # Index kennt nur 0.7; installiert ist 0.6 ohne angebotenes Update.
+        r = host([pkg("libperl5.38t64", "5.38.2-3.2ubuntu0.6", "perl")])
+        r.ubuntu_origin = set()
+        r.ubuntu_names = {"libperl5.38t64"}
+        oval = {"CVE-P": cve("CVE-P", "high", {"perl": "5.38.2-3.2ubuntu0.7"})}
+        v = find_open_vulns(r, oval, set())
+        self.assertEqual([x.status for x in v], ["Fix 5.38.2-3.2ubuntu0.7 nicht angeboten"])
+
+    def test_package_without_any_ubuntu_origin_is_skipped(self):
+        r = host([pkg("docker-ce", "5:28.0.4-1", "docker-ce")])
+        r.ubuntu_origin = set()
+        r.ubuntu_names = {"other"}
+        oval = {"CVE-D": cve("CVE-D", "high", {"docker-ce": None})}
         self.assertEqual(find_open_vulns(r, oval, set()), [])
 
     def test_no_kernel_release_skips_kernel(self):

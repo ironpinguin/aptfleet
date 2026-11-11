@@ -23,7 +23,7 @@
       "vendorProject": "Cisco",
       "product": "IOS XE",
       "vulnerabilityName": "Cisco IOS XE Web UI Vulnerability",
-      "dateAdded": "2026-11-04",
+      "dateAdded": "2026-11-05",
       "shortDescription": "Cisco IOS XE contains a vulnerability in the web UI (Beispieldaten).",
       "requiredAction": "Apply mitigations per vendor instructions or discontinue use of the product if mitigations are unavailable.",
       "dueDate": "2026-11-25",

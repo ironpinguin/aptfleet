@@ -13,19 +13,30 @@ MAX_WORKERS = 6
 SOURCES_MARKER = "===SECTION sources==="
 CONNECT_TIMEOUT = 15
 
-# Bash-Fragment: liest "<paket> <version>"-Zeilen von stdin und gibt die davon aus Ubuntu-Origins
-# (apt-Listen mit "Origin: Ubuntu") stammenden Paare aus. POSIX-awk, mawk-kompatibel.
+# Bash-Fragment: liest "<paket> <version>"-Zeilen von stdin und gibt aus
+#   "<paket> <version>", wenn das Paar in einer Ubuntu-Paketliste steht (apt-Listen mit
+#   "Origin: Ubuntu"), sonst
+#   "<paket> *", wenn der Name in einer Ubuntu- und in keiner Fremd-Paketliste vorkommt
+#   (Ubuntu-Indizes führen nur Release- und neueste Update-Version; überholte Versionen).
+# Die Gruppen werden per awk-Zuweisungsoperand (g=u / g=f) getrennt. POSIX-awk, mawk-kompatibel.
 ORIGINS_SNIPPET = r"""lists="${APT_LISTS:-/var/lib/apt/lists}"
-files=""
+ubuntu=""
+foreign=""
 for rel in "$lists"/*_InRelease "$lists"/*_Release; do
   [ -f "$rel" ] || continue
-  grep -q '^Origin: Ubuntu' "$rel" || continue
+  group=foreign
+  grep -q '^Origin: Ubuntu' "$rel" && group=ubuntu
   prefix="${rel%InRelease}"; prefix="${prefix%Release}"
-  for f in "$prefix"*_Packages; do [ -f "$f" ] && files="$files $f"; done
+  for f in "$prefix"*_Packages; do
+    [ -f "$f" ] || continue
+    if [ "$group" = ubuntu ]; then ubuntu="$ubuntu $f"; else foreign="$foreign $f"; fi
+  done
 done
-awk 'FNR==NR { want[$1" "$2]=1; next }
-     /^Package: / { p=$2 }
-     /^Version: / { k=p" "$2; if ((k in want) && !(k in seen)) { print k; seen[k]=1 } }' - $files"""
+awk 'g == "" { want[$1" "$2]=1; name[$1]=1; next }
+     /^Package: / { p=$2; if (p in name) { if (g == "u") inu[p]=1; else inf[p]=1 } }
+     g == "u" && /^Version: / {
+       k=p" "$2; if ((k in want) && !(k in seen)) { print k; seen[k]=1; hit[p]=1 } }
+     END { for (p in inu) if (!(p in inf) && !(p in hit)) print p" *" }' - g=u $ubuntu g=f $foreign"""
 
 # Wird per stdin an `bash -s -- <refresh 0|1> [paket ...]` übergeben; legt nichts auf dem Host ab.
 # Alle Befehle bekommen </dev/null, damit sie nicht den Rest des Skripts von stdin lesen.

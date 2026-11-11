@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 from parsing import build_host_report, split_sections
-from remote import REMOTE_SCRIPT, HostResult, build_ssh_command, run_all, run_host
+from remote import ORIGINS_SNIPPET, REMOTE_SCRIPT, HostResult, build_ssh_command, run_all, run_host
 
 STUBS = {
     "apt": """#!/bin/sh
@@ -154,6 +154,57 @@ class RemoteScriptTest(unittest.TestCase):
             f.unlink()
         sections = split_sections(self.run_script("1"))
         self.assertEqual(sections["origins"], "")
+
+    def run_origins(self, installed: str) -> list[str]:
+        """Führt nur ORIGINS_SNIPPET aus; stdin = `<name> <version>`-Zeilen."""
+        proc = subprocess.run(
+            ["bash", "-c", ORIGINS_SNIPPET],
+            input=installed,
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin", "LC_ALL": "C", "APT_LISTS": str(self.lists_dir)},
+            timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return sorted(proc.stdout.splitlines())
+
+    def add_superseded_lists(self) -> None:
+        """Ubuntu-Index nur mit neuerer Version; Name teils auch im Docker-Index."""
+        (self.lists_dir / "archive.ubuntu.com_ubuntu_dists_noble-updates_main_binary-amd64_Packages").write_text(
+            PACKAGES_STANZA.format(p="libperl5.38t64", v="5.38.2-3.2ubuntu0.7")
+            + PACKAGES_STANZA.format(p="containerd", v="1.7.28-0ubuntu1~24.04.1")
+            + PACKAGES_STANZA.format(p="openssl", v="3.0.13-0ubuntu3.5")
+        )
+        (self.lists_dir / "download.docker.com_linux_ubuntu_dists_noble_stable_binary-amd64_Packages").write_text(
+            PACKAGES_STANZA.format(p="docker-ce", v="5:28.0.4-1")
+            + PACKAGES_STANZA.format(p="containerd", v="1.7.27-1")
+        )
+
+    def test_origins_superseded_ubuntu_version_gives_name_wildcard(self):
+        self.add_superseded_lists()
+        out = self.run_origins("libperl5.38t64 5.38.2-3.2ubuntu0.6\n")
+        self.assertEqual(out, ["libperl5.38t64 *"])
+
+    def test_origins_name_also_in_foreign_list_is_not_output(self):
+        self.add_superseded_lists()
+        self.assertEqual(self.run_origins("containerd 1.7.27-1\ndocker-ce 5:28.0.4-1\n"), [])
+
+    def test_origins_exact_match_suppresses_wildcard(self):
+        self.add_superseded_lists()
+        # openssl 3.0.13-0ubuntu3.4 steht exakt in noble, 3.5 in noble-updates.
+        self.assertEqual(self.run_origins("openssl 3.0.13-0ubuntu3.4\n"), ["openssl 3.0.13-0ubuntu3.4"])
+
+    def test_origins_unknown_package_is_not_output(self):
+        self.add_superseded_lists()
+        self.assertEqual(self.run_origins("localpkg 1.0\n"), [])
+
+    def test_origins_full_script_reports_superseded_package(self):
+        self.add_superseded_lists()
+        (self.lists_dir / "archive.ubuntu.com_ubuntu_dists_noble_main_binary-amd64_Packages").write_text(
+            PACKAGES_STANZA.format(p="openssl", v="3.0.13-0ubuntu3.3")
+        )
+        sections = split_sections(self.run_script("1"))
+        self.assertEqual(sections["origins"].splitlines(), ["openssl *"])
 
     def test_forces_c_locale(self):
         self.assertIn("export LC_ALL=C", REMOTE_SCRIPT)

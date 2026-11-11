@@ -93,7 +93,7 @@ class LoadOvalTest(unittest.TestCase):
 
     def test_rejects_invalid_codename(self):
         calls = []
-        for bad in ["", "noble/../x", "Noble", "24.04"]:
+        for bad in ["", "noble/../x", "Noble", "24.04", "noble\n"]:
             self.assertIsNone(
                 load_oval(bad, self.dir, fetch=lambda c: calls.append(c) or self.blob, now=0.0)
             )

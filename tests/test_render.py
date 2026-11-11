@@ -275,6 +275,11 @@ class RenderReportTest(unittest.TestCase):
         self.assertIn("  (keine)", render_report([r], {}, kev_recent=[], kev_recent_days=7))
         self.assertNotIn("Neu auf CISA KEV", render_report([r], {}))
 
+    def test_kev_recent_single_day_heading(self):
+        out = render_report([HostReport("h", os_version="24.04")], {}, kev_recent=[], kev_recent_days=1)
+        self.assertIn("Neu auf CISA KEV (letzter Tag):", out)
+        self.assertNotIn("letzte 1 Tage", out)
+
     def test_kev_recent_affects_open_vuln_host(self):
         out = render_report([self._open_vuln_report()], {}, kev_recent=[KEV_SSH])
         self.assertIn("betrifft: git-ansible", out)

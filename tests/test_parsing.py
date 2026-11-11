@@ -287,7 +287,24 @@ class NewSectionsTest(unittest.TestCase):
         self.assertEqual(parse_os("24.04"), ("24.04", None))
 
     def test_parse_origins(self):
-        self.assertEqual(parse_origins("openssl 1.0\n\nfoo 2\n"), {("openssl", "1.0"), ("foo", "2")})
+        self.assertEqual(
+            parse_origins("openssl 1.0\n\nfoo 2\n"), ({("openssl", "1.0"), ("foo", "2")}, set())
+        )
+
+    def test_parse_origins_name_wildcard(self):
+        self.assertEqual(parse_origins("openssl 1.0\nlibperl5.38t64 *\n"), ({("openssl", "1.0")}, {"libperl5.38t64"}))
+
+    def test_is_ubuntu_package(self):
+        report = build_host_report(
+            "h",
+            "===SECTION os===\n24.04\nnoble\n===SECTION installed===\n"
+            "ii  a 1 a 1\nii  b 0.6 b 0.6\nii  c 1 c 1\n"
+            "===SECTION origins===\na 1\nb *\n===END===",
+        )
+        self.assertEqual(report.ubuntu_names, {"b"})
+        self.assertEqual(
+            [p.binary for p in report.installed if report.is_ubuntu_package(p)], ["a", "b"]
+        )
 
     def test_build_host_report_new_fields(self):
         report = build_host_report("w", fixture("remote_output.txt"))
@@ -304,6 +321,28 @@ class NewSectionsTest(unittest.TestCase):
         self.assertEqual(build_host_report("h", "===SECTION os===\n24.04\nnoble\n===END===").vuln_check_problem, "keine Paketliste")
         self.assertEqual(build_host_report("h", base + "===END===").vuln_check_problem, "Paketherkunft nicht ermittelbar")
         self.assertEqual(build_host_report("h", base + "===SECTION origins===\na 1\n===END===").vuln_check_problem, None)
+        self.assertEqual(build_host_report("h", base + "===SECTION origins===\na *\n===END===").vuln_check_problem, None)
+
+    def test_running_kernel_without_installed_image_is_a_problem(self):
+        base = "===SECTION os===\n24.04\nnoble\n===SECTION installed===\nii  a 1 a 1\n"
+        report = build_host_report(
+            "h", base + "===SECTION kernel===\n6.8.0-40-generic\n===SECTION origins===\na 1\n===END==="
+        )
+        self.assertEqual(
+            report.vuln_check_problem, "Kernel-Prüfung nicht möglich: kein Paket für 6.8.0-40-generic"
+        )
+
+    def test_running_kernel_image_found_without_ubuntu_origin(self):
+        raw = (
+            "===SECTION os===\n24.04\nnoble\n===SECTION installed===\nii  a 1 a 1\n"
+            "ii  linux-image-unsigned-6.8.0-40-generic 6.8.0-40.40 linux 6.8.0-40.40\n"
+            "===SECTION kernel===\n6.8.0-40-generic\n===SECTION origins===\na 1\n===END==="
+        )
+        self.assertIsNone(build_host_report("h", raw).vuln_check_problem)
+
+    def test_other_problem_wins_over_missing_kernel_image(self):
+        raw = "===SECTION os===\n24.04\nnoble\n===SECTION kernel===\n6.8.0-40-generic\n===END==="
+        self.assertEqual(build_host_report("h", raw).vuln_check_problem, "keine Paketliste")
 
     def test_error_leaves_problem_none(self):
         self.assertIsNone(build_host_report("h", "", error="x").vuln_check_problem)

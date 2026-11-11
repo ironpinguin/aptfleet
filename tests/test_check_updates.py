@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import datetime
 import io
 import subprocess
@@ -232,6 +233,35 @@ class MainTest(unittest.TestCase):
         self.assertIn(
             "Lücken-Prüfung nicht möglich: Ubuntu-Schwachstellendaten (noble) nicht abrufbar", out
         )
+
+    def test_oval_unavailable_notice_once_per_codename(self):
+        code, out = self.run_main("--host", "rootserver-ansible", "--host", "webserver-ansible", oval=None)
+        self.assertEqual(code, 3)
+        notice = (
+            "Ubuntu-Schwachstellendaten (noble) nicht abrufbar – Lücken-Prüfung für betroffene Hosts entfällt"
+        )
+        self.assertEqual(out.count(notice), 1)
+        self.assertEqual(out.count("Lücken-Prüfung nicht möglich: Ubuntu-Schwachstellendaten (noble)"), 2)
+
+    def test_kev_recent_rejects_values_below_one(self):
+        for bad in ("0", "-3"):
+            with self.assertRaises(SystemExit) as ctx, contextlib.redirect_stderr(io.StringIO()):
+                self.run_main("--kev-recent", bad)
+            self.assertEqual(ctx.exception.code, 2)
+        self.assertEqual(self.run_calls, [])
+
+    def test_kev_recent_one_day_heading(self):
+        _, out = self.run_main("--host", "webserver-ansible", "--kev-recent", "1")
+        self.assertIn("Neu auf CISA KEV (letzter Tag):", out)
+
+    def test_verbose_skips_superseded_ubuntu_packages(self):
+        raw = (FIXTURES / "remote_output.txt").read_text().replace(
+            "libc6 2.39-0ubuntu8.3\n", "libc6 *\n"
+        )
+        self.assertIn("libc6 *", raw)
+        self.fake_run_all = lambda hosts, *a, **k: [HostResult(h, True, None, raw) for h in hosts]
+        _, out = self.run_main("--host", "webserver-ansible", "--verbose")
+        self.assertIn("1 Pakete ohne Ubuntu-Herkunft nicht geprüft (docker-ce)", out)
 
     def test_oval_loaded_once_per_codename(self):
         self.run_main()  # zwei erreichbare noble-Hosts

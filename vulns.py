@@ -3,7 +3,7 @@ from __future__ import annotations
 from cve_info import priority_rank
 from debversion import compare_versions
 from oval import OvalCve
-from parsing import HostReport, InstalledPackage, OpenVuln
+from parsing import HostReport, InstalledPackage, OpenVuln, running_kernel_image
 
 RELEVANT_PRIORITIES = {"high", "critical"}
 
@@ -42,7 +42,7 @@ def _package_vulns(
 ) -> list[OpenVuln]:
     groups: dict[str, list[InstalledPackage]] = {}
     for pkg in report.installed:
-        if (pkg.binary, pkg.version) in report.ubuntu_origin:
+        if report.is_ubuntu_package(pkg):
             groups.setdefault(pkg.source, []).append(pkg)
 
     result: list[OpenVuln] = []
@@ -77,22 +77,10 @@ def _package_vulns(
     return result
 
 
-def _running_kernel(report: HostReport) -> InstalledPackage | None:
-    release = report.kernel_release
-    if not release:
-        return None
-    wanted = (f"linux-image-{release}", f"linux-image-unsigned-{release}")
-    for binary in wanted:
-        for pkg in report.installed:
-            if pkg.binary == binary and (pkg.binary, pkg.version) in report.ubuntu_origin:
-                return pkg
-    return None
-
-
 def _kernel_vulns(
     report: HostReport, relevant: list[OvalCve], kev_ids: set[str]
 ) -> list[OpenVuln]:
-    image = _running_kernel(report)
+    image = running_kernel_image(report.installed, report.kernel_release)
     if image is None:
         return []
     name = kernel_source_name(image.source)

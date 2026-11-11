@@ -137,9 +137,28 @@ class HostReport:
     codename: str | None = None
     installed: list[InstalledPackage] = field(default_factory=list)
     ubuntu_origin: set[tuple[str, str]] = field(default_factory=set)
+    # Namen, die in Ubuntu- und in keiner Fremd-Paketliste stehen (gelten für jede Version).
+    ubuntu_names: set[str] = field(default_factory=set)
     kernel_release: str | None = None
     open_vulns: list[OpenVuln] = field(default_factory=list)
     vuln_check_problem: str | None = None
+
+    def is_ubuntu_package(self, pkg: InstalledPackage) -> bool:
+        return (pkg.binary, pkg.version) in self.ubuntu_origin or pkg.binary in self.ubuntu_names
+
+
+def running_kernel_image(
+    installed: list[InstalledPackage], release: str | None
+) -> InstalledPackage | None:
+    """Image-Paket des laufenden Kernels; ohne Herkunftsprüfung, da Ubuntu alte
+    Kernel-ABI-Pakete aus den Indizes entfernt."""
+    if not release:
+        return None
+    for binary in (f"linux-image-{release}", f"linux-image-unsigned-{release}"):
+        for pkg in installed:
+            if pkg.binary == binary:
+                return pkg
+    return None
 
 
 def parse_installed(text: str) -> list[InstalledPackage]:
@@ -160,13 +179,19 @@ def parse_installed(text: str) -> list[InstalledPackage]:
     return result
 
 
-def parse_origins(text: str) -> set[tuple[str, str]]:
+def parse_origins(text: str) -> tuple[set[tuple[str, str]], set[str]]:
+    """`<name> <version>` → exaktes Paar; `<name> *` → Name gilt für jede Version."""
     origins: set[tuple[str, str]] = set()
+    names: set[str] = set()
     for line in text.splitlines():
         parts = line.split()
-        if len(parts) >= 2:
+        if len(parts) < 2:
+            continue
+        if parts[1] == "*":
+            names.add(parts[0])
+        else:
             origins.add((parts[0], parts[1]))
-    return origins
+    return origins, names
 
 
 def parse_os(text: str) -> tuple[str | None, str | None]:
@@ -218,14 +243,19 @@ def build_host_report(host: str, raw_output: str, error: str | None = None) -> H
     os_version, codename = parse_os(sections.get("os", ""))
     report = HostReport(host=host, os_version=os_version, codename=codename)
     report.installed = parse_installed(sections.get("installed", ""))
-    report.ubuntu_origin = parse_origins(sections.get("origins", ""))
+    report.ubuntu_origin, report.ubuntu_names = parse_origins(sections.get("origins", ""))
     report.kernel_release = sections.get("kernel", "").strip() or None
     if not codename:
         report.vuln_check_problem = "kein Ubuntu-Codename"
     elif not report.installed:
         report.vuln_check_problem = "keine Paketliste"
-    elif not report.ubuntu_origin:
+    elif not report.ubuntu_origin and not report.ubuntu_names:
         report.vuln_check_problem = "Paketherkunft nicht ermittelbar"
+    elif report.kernel_release and not running_kernel_image(
+        report.installed, report.kernel_release
+    ):
+        release = report.kernel_release
+        report.vuln_check_problem = f"Kernel-Prüfung nicht möglich: kein Paket für {release}"
 
     apt_update = sections.get("apt_update")
     if apt_update is not None:

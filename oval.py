@@ -19,7 +19,7 @@ DEFAULT_CACHE_DIR = Path.home() / ".cache" / "updates_report"
 CACHE_TTL_SECONDS = 24 * 3600
 FETCH_TIMEOUT = 120
 
-CODENAME_RE = re.compile(r"^[a-z]+$")
+CODENAME_RE = re.compile(r"[a-z]+")
 CVE_RE = re.compile(r'<cve href="[^"]*" priority="([a-z]+)"[^>]*>(CVE-\d{4}-\d+)</cve>')
 # Archiv kann "noble", "esm-apps/noble" o. ä. sein, daher großzügige Zeichenklasse.
 PKG_RE = re.compile(
@@ -154,7 +154,7 @@ def load_oval(
 ) -> OvalData | None:
     """Liefert die OVAL-Daten (Cache, 24 h TTL); None bei ungültigem Codename
     oder wenn weder Abruf noch Cache möglich sind."""
-    if not CODENAME_RE.match(codename):
+    if not CODENAME_RE.fullmatch(codename):
         return None
     now = time.time() if now is None else now
     path = cache_dir / f"oval-{codename}.json"

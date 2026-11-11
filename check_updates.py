@@ -59,12 +59,22 @@ def _format_date(timestamp: float) -> str:
 
 def _foreign_notice(report: HostReport) -> str | None:
     names = sorted(
-        {p.binary for p in report.installed if (p.binary, p.version) not in report.ubuntu_origin}
+        {p.binary for p in report.installed if not report.is_ubuntu_package(p)}
     )
     if not names:
         return None
     shown = ", ".join(names[:10]) + (", …" if len(names) > 10 else "")
     return f"{report.host}: {len(names)} Pakete ohne Ubuntu-Herkunft nicht geprüft ({shown})"
+
+
+def _positive_days(value: str) -> int:
+    try:
+        days = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"keine ganze Zahl: {value!r}") from None
+    if days < 1:
+        raise argparse.ArgumentTypeError(f"muss mindestens 1 sein: {days}")
+    return days
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -88,7 +98,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, metavar="SEKUNDEN",
                         help=f"Timeout pro Host (Default {DEFAULT_TIMEOUT})")
     parser.add_argument("--verbose", action="store_true", help="nicht parsebare Zeilen anzeigen")
-    parser.add_argument("--kev-recent", nargs="?", const=7, type=int, default=None, metavar="TAGE",
+    parser.add_argument("--kev-recent", nargs="?", const=7, type=_positive_days, default=None,
+                        metavar="TAGE",
                         help="zuletzt auf CISA KEV aufgenommene CVEs anzeigen (Default ohne Wert: 7 Tage)")
     return parser.parse_args(argv)
 
@@ -147,7 +158,12 @@ def main(
     for codename in dict.fromkeys(r.codename for r in checkable):
         data = oval_loader(codename)
         oval_by_codename[codename] = data
-        if data is not None and data.stale:
+        if data is None:
+            notices.append(
+                f"Ubuntu-Schwachstellendaten ({codename}) nicht abrufbar"
+                " – Lücken-Prüfung für betroffene Hosts entfällt"
+            )
+        elif data.stale:
             notices.append(
                 f"Ubuntu-Schwachstellendaten ({codename}) vom {_format_date(data.fetched_at)}"
             )
