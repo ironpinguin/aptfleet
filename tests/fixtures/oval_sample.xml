@@ -1,0 +1,167 @@
+<oval_definitions>
+<definitions>
+    <definition id="oval:com.ubuntu.noble:def:200224390000000" class="vulnerability" version="1">
+      <metadata>
+        <title>CVE-2002-2439 on Ubuntu 24.04 LTS (noble) - low</title>
+        <affected family="unix">
+          <platform>Ubuntu 24.04 LTS</platform>
+        </affected>
+        <reference source="CVE" ref_id="CVE-2002-2439" ref_url="https://www.cve.org/CVERecord?id=CVE-2002-2439" />
+        <advisory from="security@ubuntu.com">
+          <severity>Low</severity>
+          <rights>Copyright (C) 2026 Canonical Ltd.</rights>
+          <public_date>2019-10-23T18:15:00Z</public_date>
+          <cve href="https://ubuntu.com/security/CVE-2002-2439" priority="low" public="20191023">CVE-2002-2439</cve>
+        </advisory>
+      </metadata>
+      <criteria>
+        <extend_definition applicability_check="true" definition_ref="oval:com.ubuntu.noble:def:100" comment="Ubuntu 24.04 LTS (noble) is installed" />
+        <criteria operator="OR">
+          <criterion test_ref="oval:com.ubuntu.noble:tst:200224390000000" comment="gcc-arm-none-eabi source package in noble, might be affected and may need fixing." />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:200224390000010" comment="gcc-h8300-hms source package in noble, might be affected and may need fixing." />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:200224390000020" comment="gcc-mingw-w64 source package in noble, might be affected and may need fixing." />
+        </criteria>
+      </criteria>
+    </definition>
+    <definition id="oval:com.ubuntu.noble:def:202463870000000" class="vulnerability" version="1">
+      <metadata>
+        <title>CVE-2024-6387 on Ubuntu 24.04 LTS (noble) - high</title>
+        <affected family="unix">
+          <platform>Ubuntu 24.04 LTS</platform>
+        </affected>
+        <reference source="CVE" ref_id="CVE-2024-6387" ref_url="https://www.cve.org/CVERecord?id=CVE-2024-6387" />
+        <reference source="USN" ref_id="USN-6859-1" ref_url="https://ubuntu.com/security/notices/USN-6859-1" />
+        <advisory from="security@ubuntu.com">
+          <severity>High</severity>
+          <rights>Copyright (C) 2026 Canonical Ltd.</rights>
+          <public_date>2024-07-01T00:00:00Z</public_date>
+          <cve href="https://ubuntu.com/security/CVE-2024-6387" priority="high" public="20240701" cvss_score="8.1" cvss_vector="CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H" cvss_severity="high" usns="6859-1">CVE-2024-6387</cve>
+        </advisory>
+      </metadata>
+      <criteria>
+        <extend_definition applicability_check="true" definition_ref="oval:com.ubuntu.noble:def:100" comment="Ubuntu 24.04 LTS (noble) is installed" />
+        <criterion test_ref="oval:com.ubuntu.noble:tst:202463870000000" comment="openssh source package in noble, is affected and has been fixed (note: '1:9.6p1-3ubuntu13.3')." />
+      </criteria>
+    </definition>
+    <definition id="oval:com.ubuntu.noble:def:2024582380000000" class="vulnerability" version="1">
+      <metadata>
+        <title>CVE-2024-58238 on Ubuntu 24.04 LTS (noble) - low</title>
+        <affected family="unix">
+          <platform>Ubuntu 24.04 LTS</platform>
+        </affected>
+        <reference source="CVE" ref_id="CVE-2024-58238" ref_url="https://www.cve.org/CVERecord?id=CVE-2024-58238" />
+        <advisory from="security@ubuntu.com">
+          <severity>Low</severity>
+          <rights>Copyright (C) 2026 Canonical Ltd.</rights>
+          <public_date>2025-08-09T15:15:00Z</public_date>
+          <cve href="https://ubuntu.com/security/CVE-2024-58238" priority="low" public="20250809" cvss_score="5.5" cvss_vector="CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:H" cvss_severity="medium">CVE-2024-58238</cve>
+        </advisory>
+      </metadata>
+      <criteria>
+        <extend_definition applicability_check="true" definition_ref="oval:com.ubuntu.noble:def:100" comment="Ubuntu 24.04 LTS (noble) is installed" />
+        <criteria operator="OR">
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000000" comment="Is kernel 'linux' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2023528890000000" comment="'linux' kernel in noble was vulnerable but has been fixed (note: '6.8.0-50.51')." />
+          </criteria>
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2020123510000010" comment="Is kernel 'linux-aws' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2023528890000010" comment="'linux-aws' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1020.22')." />
+          </criteria>
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000050" comment="Is kernel 'linux-azure' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2023528890000010" comment="'linux-azure' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1020.23')." />
+          </criteria>
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000060" comment="Is kernel 'linux-azure-6.11' running?" />
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2020123510000040" comment="Is kernel 'linux-gcp' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2023528890000020" comment="'linux-gcp' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1019.21')." />
+          </criteria>
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000170" comment="Is kernel 'linux-gcp-6.11' running?" />
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2020123510000050" comment="Is kernel 'linux-gke' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2022487720000010" comment="'linux-gke' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1015.19')." />
+          </criteria>
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000220" comment="Is kernel 'linux-gkeop' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2023528870000020" comment="'linux-gkeop' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1002.4')." />
+          </criteria>
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000230" comment="Is kernel 'linux-hwe-6.11' running?" />
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000270" comment="Is kernel 'linux-ibm' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2022490340000090" comment="'linux-ibm' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1017.17')." />
+          </criteria>
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000280" comment="Is kernel 'linux-intel' running?" />
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000290" comment="Is kernel 'linux-lowlatency' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2023528890000000" comment="'linux-lowlatency' kernel in noble was vulnerable but has been fixed (note: '6.8.0-50.51.1')." />
+          </criteria>
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000300" comment="Is kernel 'linux-lowlatency-hwe-6.11' running?" />
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000310" comment="Is kernel 'linux-nvidia' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2023528890000020" comment="'linux-nvidia' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1019.21')." />
+          </criteria>
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000350" comment="Is kernel 'linux-nvidia-lowlatency' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2023528890000020" comment="'linux-nvidia-lowlatency' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1019.21.1')." />
+          </criteria>
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000400" comment="Is kernel 'linux-oem-6.8' running?" />
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000410" comment="Is kernel 'linux-oracle' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2022490340000090" comment="'linux-oracle' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1017.18')." />
+          </criteria>
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000450" comment="Is kernel 'linux-raspi' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2023528870000030" comment="'linux-raspi' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1016.18')." />
+          </criteria>
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201111800000000" comment="Is kernel 'linux-raspi-realtime' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201111800000010" comment="Is kernel 'linux-realtime' running?" />
+          <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000460" comment="Is kernel 'linux-riscv' running?" />
+          <criteria operator="AND">
+            <criterion test_ref="oval:com.ubuntu.noble:tst:201245420000510" comment="Is kernel 'linux-xilinx' running?" />
+            <criterion test_ref="oval:com.ubuntu.noble:tst:2022490340000090" comment="'linux-xilinx' kernel in noble was vulnerable but has been fixed (note: '6.8.0-1017.18')." />
+          </criteria>
+        </criteria>
+      </criteria>
+    </definition>
+    <definition id="oval:com.ubuntu.noble:def:2025600200000000" class="vulnerability" version="1">
+      <metadata>
+        <title>CVE-2025-60020 on Ubuntu 24.04 LTS (noble) - medium</title>
+        <affected family="unix">
+          <platform>Ubuntu 24.04 LTS</platform>
+        </affected>
+        <reference source="CVE" ref_id="CVE-2025-60020" ref_url="https://www.cve.org/CVERecord?id=CVE-2025-60020" />
+        <reference source="USN" ref_id="USN-8359-1" ref_url="https://ubuntu.com/security/notices/USN-8359-1" />
+        <advisory from="security@ubuntu.com">
+          <severity>Medium</severity>
+          <rights>Copyright (C) 2026 Canonical Ltd.</rights>
+          <public_date>2025-09-24T13:15:00Z</public_date>
+          <cve href="https://ubuntu.com/security/CVE-2025-60020" priority="medium" public="20250924" cvss_score="6.4" cvss_vector="CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:L/I:L/A:N" cvss_severity="medium" usns="8359-1">CVE-2025-60020</cve>
+        </advisory>
+      </metadata>
+      <criteria>
+        <extend_definition applicability_check="true" definition_ref="oval:com.ubuntu.noble:def:100" comment="Ubuntu 24.04 LTS (noble) is installed" />
+        <criterion test_ref="oval:com.ubuntu.noble:tst:2025600200000000" comment="nncp source package in esm-apps/noble, is affected and has been fixed (note: '8.10.0-8ubuntu0.3+esm3')." />
+      </criteria>
+    </definition>
+    <definition id="oval:com.ubuntu.noble:def:202638860000000" class="vulnerability" version="1">
+      <metadata>
+        <title>CVE-2026-3886 on Ubuntu 24.04 LTS (noble) - high</title>
+        <affected family="unix">
+          <platform>Ubuntu 24.04 LTS</platform>
+        </affected>
+        <reference source="CVE" ref_id="CVE-2026-3886" ref_url="https://www.cve.org/CVERecord?id=CVE-2026-3886" />
+        <advisory from="security@ubuntu.com">
+          <severity>High</severity>
+          <rights>Copyright (C) 2026 Canonical Ltd.</rights>
+          <public_date>2026-07-09T00:00:00Z</public_date>
+          <cve href="https://ubuntu.com/security/CVE-2026-3886" priority="high" public="20260709">CVE-2026-3886</cve>
+        </advisory>
+      </metadata>
+      <criteria>
+        <extend_definition applicability_check="true" definition_ref="oval:com.ubuntu.noble:def:100" comment="Ubuntu 24.04 LTS (noble) is installed" />
+        <criterion test_ref="oval:com.ubuntu.noble:tst:2019120670000000" comment="qemu source package in noble, might be affected and may need fixing." />
+      </criteria>
+    </definition>
+</definitions>
+</oval_definitions>
