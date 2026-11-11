@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import io
 import subprocess
 import sys
@@ -9,7 +10,9 @@ from pathlib import Path
 
 from check_updates import SSH_CONFIG, exit_code, main, read_inventory, select_hosts
 from cve_info import CveInfo
-from parsing import HostReport, PackageReport, Upgrade
+from kev import KevData, KevEntry
+from oval import OvalCve, OvalData
+from parsing import HostReport, OpenVuln, PackageReport, Upgrade
 from remote import HostResult
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -58,6 +61,35 @@ class ExitCodeTest(unittest.TestCase):
             exit_code([HostReport("a", packages=[pkg(True)]), HostReport("b", error="x")]), 2
         )
 
+    def test_codes_with_vulns_and_incomplete(self):
+        kev_vuln = OpenVuln("x", ["x"], "1", "CVE-1", "high", "kein Fix", True)
+        plain_vuln = OpenVuln("x", ["x"], "1", "CVE-2", "high", "kein Fix", False)
+        self.assertEqual(exit_code([HostReport("a", open_vulns=[kev_vuln])]), 1)
+        self.assertEqual(exit_code([HostReport("a", open_vulns=[plain_vuln])]), 0)
+        self.assertEqual(exit_code([HostReport("a", packages=[pkg(True)])], incomplete=True), 3)
+        self.assertEqual(exit_code([HostReport("a", vuln_check_problem="x")]), 3)
+        self.assertEqual(exit_code([HostReport("a"), HostReport("b", error="x")], incomplete=True), 2)
+
+
+TODAY = datetime.date(2026, 11, 11)
+_UNSET = object()
+
+
+def default_kev() -> KevData:
+    return KevData(
+        {
+            "CVE-2025-9232": KevEntry("CVE-2025-9232", "OpenSSL", "OpenSSL", "x", "2026-11-10"),
+            "CVE-2025-7000": KevEntry("CVE-2025-7000", "GNOME", "libxml2", "y", "2026-11-09"),
+        },
+        0.0,
+        False,
+    )
+
+
+def default_oval() -> OvalData:
+    # libxml2 (installed, Ubuntu-Herkunft) ohne Fix; nicht in einem Changelog der Updates.
+    return OvalData({"CVE-2025-7000": OvalCve("CVE-2025-7000", "high", {"libxml2": None}, {})}, 0.0, False)
+
 
 class MainTest(unittest.TestCase):
     def setUp(self):
@@ -67,6 +99,7 @@ class MainTest(unittest.TestCase):
         self.run_calls = []
         self.lookup_calls = []
         self.users = []
+        self.oval_calls = []
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -84,13 +117,23 @@ class MainTest(unittest.TestCase):
         self.lookup_calls.append(set(cve_ids))
         return {"CVE-2025-9232": CveInfo("CVE-2025-9232", "high", "x")}, ["CVE-2025-9231"]
 
-    def run_main(self, *argv):
+    def run_main(self, *argv, kev=_UNSET, oval=_UNSET):
+        kev_data = default_kev() if kev is _UNSET else kev
+        oval_data = default_oval() if oval is _UNSET else oval
+
+        def oval_loader(codename):
+            self.oval_calls.append(codename)
+            return oval_data
+
         out = io.StringIO()
         code = main(
             list(argv),
             inventory=self.inventory,
             run_all=self.fake_run_all,
             lookup=self.fake_lookup,
+            kev_loader=lambda: kev_data,
+            oval_loader=oval_loader,
+            today=TODAY,
             stdout=out,
         )
         return code, out.getvalue()
@@ -106,7 +149,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(timeout, 120)
         self.assertEqual(self.lookup_calls, [{"CVE-2025-9231", "CVE-2025-9232"}])
         self.assertIn("━━ pdf-ansible — FEHLER: ssh timeout nach 120s ━━", out)
-        self.assertIn("CVE-2025-9231, CVE-2025-9232 (high)", out)
+        self.assertIn("CVE-2025-9231, CVE-2025-9232 (high, KEV)", out)
         self.assertIn("Hinweis: CVE-Prioritäten teilweise nicht abrufbar", out)
         self.assertNotIn("\033[", out)
 
@@ -151,9 +194,68 @@ class MainTest(unittest.TestCase):
         def run_all(hosts, *args, **kwargs):
             return [HostResult(h, True, None, "===SECTION upgradable===\n===END===\n") for h in hosts]
 
-        code = main([], inventory=self.inventory, run_all=run_all, lookup=self.fake_lookup, stdout=io.StringIO())
-        self.assertEqual(code, 0)
+        code = main(
+            [],
+            inventory=self.inventory,
+            run_all=run_all,
+            lookup=self.fake_lookup,
+            kev_loader=default_kev,
+            oval_loader=lambda codename: default_oval(),
+            stdout=io.StringIO(),
+        )
+        # Host-Ausgabe ohne `installed`/Codename: Lücken-Prüfung unmöglich => unvollständig (3).
+        self.assertEqual(code, 3)
         self.assertEqual(self.lookup_calls, [])
+
+    def test_full_run_marks_kev_and_lists_open_vulns(self):
+        code, out = self.run_main("--host", "webserver-ansible")
+        self.assertEqual(code, 1)
+        self.assertIn("(high, KEV)", out)
+        self.assertIn("Offene Lücken ohne Fix:", out)
+
+    def test_kev_unavailable_gives_3(self):
+        code, out = self.run_main("--host", "webserver-ansible", kev=None)
+        self.assertEqual(code, 3)
+        self.assertIn("Hinweis: KEV-Liste nicht abrufbar", out)
+
+    def test_stale_kev_notice_keeps_exit_code(self):
+        stale = default_kev()
+        stale.stale = True
+        stale.fetched_at = datetime.datetime(2026, 11, 1, 12).timestamp()
+        code, out = self.run_main("--host", "webserver-ansible", kev=stale)
+        self.assertEqual(code, 1)
+        self.assertIn("Hinweis: KEV-Stand vom 2026-11-01", out)
+
+    def test_oval_unavailable_gives_3(self):
+        code, out = self.run_main("--host", "webserver-ansible", oval=None)
+        self.assertEqual(code, 3)
+        self.assertIn(
+            "Lücken-Prüfung nicht möglich: Ubuntu-Schwachstellendaten (noble) nicht abrufbar", out
+        )
+
+    def test_oval_loaded_once_per_codename(self):
+        self.run_main()  # zwei erreichbare noble-Hosts
+        self.assertEqual(self.oval_calls, ["noble"])
+
+    def test_unreachable_host_not_passed_to_oval(self):
+        self.run_main("--host", "pdf-ansible")
+        self.assertEqual(self.oval_calls, [])
+
+    def test_kev_recent_flag(self):
+        _, out = self.run_main("--host", "webserver-ansible", "--kev-recent")
+        self.assertIn("Neu auf CISA KEV (letzte 7 Tage):", out)
+        _, out = self.run_main("--host", "webserver-ansible", "--kev-recent", "30")
+        self.assertIn("(letzte 30 Tage)", out)
+        _, out = self.run_main("--host", "webserver-ansible")
+        self.assertNotIn("Neu auf CISA KEV", out)
+
+    def test_package_filter_limits_open_vulns(self):
+        _, out = self.run_main("--host", "webserver-ansible", "--package", "tzdata")
+        self.assertNotIn("Offene Lücken ohne Fix:", out)
+
+    def test_verbose_lists_unchecked_foreign_packages(self):
+        _, out = self.run_main("--host", "webserver-ansible", "--verbose")
+        self.assertIn("1 Pakete ohne Ubuntu-Herkunft nicht geprüft (docker-ce)", out)
 
 
 class CliSmokeTest(unittest.TestCase):
@@ -161,6 +263,8 @@ class CliSmokeTest(unittest.TestCase):
         proc = subprocess.run([sys.executable, str(SCRIPT), "--help"], capture_output=True, text=True)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("--security-only", proc.stdout)
+        self.assertIn("--kev-recent", proc.stdout)
+        self.assertIn("3 = Prüfung unvollständig", " ".join(proc.stdout.split()))
 
 
 if __name__ == "__main__":

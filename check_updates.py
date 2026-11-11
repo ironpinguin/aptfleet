@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import sys
 from pathlib import Path
 
 import cve_info
+import kev
+import oval
 import remote
+from kev import recent_entries
 from parsing import HostReport, build_host_report
 from render import render_report
+from vulns import find_open_vulns
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 INVENTORY = REPO_ROOT / "virtualhosts"
@@ -36,19 +41,38 @@ def select_hosts(inventory: list[str], requested: list[str]) -> list[str]:
     return [host for host in inventory if host in requested]
 
 
-def exit_code(reports: list[HostReport]) -> int:
+def exit_code(reports: list[HostReport], incomplete: bool = False) -> int:
     if any(report.error for report in reports):
         return 2
+    if incomplete or any(report.vuln_check_problem for report in reports):
+        return 3
     if any(p.upgrade.is_security for report in reports for p in report.packages):
         return 1
+    if any(v.kev for report in reports for v in report.open_vulns):
+        return 1
     return 0
+
+
+def _format_date(timestamp: float) -> str:
+    return datetime.date.fromtimestamp(timestamp).isoformat()
+
+
+def _foreign_notice(report: HostReport) -> str | None:
+    names = sorted(
+        {p.binary for p in report.installed if (p.binary, p.version) not in report.ubuntu_origin}
+    )
+    if not names:
+        return None
+    shown = ", ".join(names[:10]) + (", …" if len(names) > 10 else "")
+    return f"{report.host}: {len(names)} Pakete ohne Ubuntu-Herkunft nicht geprüft ({shown})"
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Zeigt anstehende Updates auf Rootserver und KVMs inkl. Security-Infos.",
-        epilog="Exit-Codes: 0 = keine Security-Updates, 1 = Security-Updates vorhanden, "
-        "2 = mindestens ein Host nicht erreichbar.",
+        epilog="Exit-Codes: 0 = nichts zu tun, 1 = Security-Updates oder offene KEV-Lücke, "
+        "2 = mindestens ein Host nicht erreichbar, "
+        "3 = Prüfung unvollständig (Feed/Host-Daten fehlen).",
     )
     parser.add_argument("--host", action="append", default=[], metavar="NAME",
                         help="nur diesen Host prüfen (Name aus virtualhosts, mehrfach möglich; "
@@ -64,6 +88,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, metavar="SEKUNDEN",
                         help=f"Timeout pro Host (Default {DEFAULT_TIMEOUT})")
     parser.add_argument("--verbose", action="store_true", help="nicht parsebare Zeilen anzeigen")
+    parser.add_argument("--kev-recent", nargs="?", const=7, type=int, default=None, metavar="TAGE",
+                        help="zuletzt auf CISA KEV aufgenommene CVEs anzeigen (Default ohne Wert: 7 Tage)")
     return parser.parse_args(argv)
 
 
@@ -73,6 +99,9 @@ def main(
     inventory: Path = INVENTORY,
     run_all=remote.run_all,
     lookup=cve_info.lookup_cves,
+    kev_loader=kev.load_kev,
+    oval_loader=oval.load_oval,
+    today: datetime.date | None = None,
     stdout=None,
 ) -> int:
     stdout = stdout or sys.stdout
@@ -99,8 +128,52 @@ def main(
     )
     reports = [build_host_report(r.host, r.raw_output, r.error) for r in results]
 
+    notices: list[str] = []
+    incomplete = False
+
+    kev_data = kev_loader()
+    if kev_data is None:
+        notices.append("KEV-Liste nicht abrufbar (cisa.gov) – keine KEV-Markierung")
+        incomplete = True
+        kev_entries: dict = {}
+    else:
+        kev_entries = kev_data.entries
+        if kev_data.stale:
+            notices.append(f"KEV-Stand vom {_format_date(kev_data.fetched_at)}")
+    kev_ids = set(kev_entries)
+
+    checkable = [r for r in reports if not r.error and not r.vuln_check_problem]
+    oval_by_codename: dict = {}
+    for codename in dict.fromkeys(r.codename for r in checkable):
+        data = oval_loader(codename)
+        oval_by_codename[codename] = data
+        if data is not None and data.stale:
+            notices.append(
+                f"Ubuntu-Schwachstellendaten ({codename}) vom {_format_date(data.fetched_at)}"
+            )
+    for report in checkable:
+        data = oval_by_codename[report.codename]
+        if data is None:
+            report.vuln_check_problem = (
+                f"Ubuntu-Schwachstellendaten ({report.codename}) nicht abrufbar"
+            )
+            continue
+        vulns = find_open_vulns(report, data.cves, kev_ids)
+        if args.package:
+            vulns = [v for v in vulns if set(v.binaries) & set(args.package)]
+        report.open_vulns = vulns
+
     cve_ids = {cve for report in reports for p in report.packages for cve in p.cves}
+    if args.details:
+        cve_ids |= {v.cve_id for report in reports for v in report.open_vulns}
     cves, failed = lookup(cve_ids) if cve_ids else ({}, [])
+
+    kev_recent = None
+    if args.kev_recent is not None and kev_data is not None:
+        kev_recent = recent_entries(kev_data, args.kev_recent, today or datetime.date.today())
+
+    if args.verbose:
+        notices.extend(n for n in map(_foreign_notice, checkable) if n)
 
     print(
         render_report(
@@ -111,10 +184,14 @@ def main(
             color=stdout.isatty(),
             cve_lookup_failed=bool(failed),
             verbose=args.verbose,
+            kev=kev_entries,
+            kev_recent=kev_recent,
+            kev_recent_days=args.kev_recent if args.kev_recent is not None else 7,
+            notices=notices,
         ),
         file=stdout,
     )
-    return exit_code(reports)
+    return exit_code(reports, incomplete)
 
 
 if __name__ == "__main__":
