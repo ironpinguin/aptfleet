@@ -5,11 +5,15 @@ from pathlib import Path
 
 from parsing import (
     ChangelogEntry,
+    InstalledPackage,
     Upgrade,
     build_host_report,
     extract_cves,
     new_changelog_entries,
     parse_changelog,
+    parse_installed,
+    parse_origins,
+    parse_os,
     parse_sources,
     parse_upgradable,
     split_sections,
@@ -31,6 +35,9 @@ class SplitSectionsTest(unittest.TestCase):
                 "os",
                 "apt_update",
                 "upgradable",
+                "installed",
+                "kernel",
+                "origins",
                 "sources",
                 "changelog openssl",
                 "changelog tzdata",
@@ -38,7 +45,7 @@ class SplitSectionsTest(unittest.TestCase):
                 "changelog docker-ce",
             ],
         )
-        self.assertEqual(sections["os"], "24.04")
+        self.assertEqual(sections["os"], "24.04\nnoble")
         self.assertEqual(sections["changelog libxml2"], "")
 
     def test_ignores_text_before_first_marker_and_after_end(self):
@@ -259,6 +266,47 @@ class BuildHostReportTest(unittest.TestCase):
         raw = "===SECTION upgradable===\nquatsch\n===END===\n"
         report = build_host_report("git-ansible", raw)
         self.assertEqual(report.unparsed, ["quatsch"])
+
+
+class NewSectionsTest(unittest.TestCase):
+    def test_parse_installed(self):
+        text = ("ii  openssl 3.0.13-0ubuntu3.4 openssl 3.0.13-0ubuntu3.4\n"
+                "ii  libfoo 1.0-1\n"
+                "rc  gone 1.0 gone 1.0\n")
+        self.assertEqual(parse_installed(text), [
+            InstalledPackage("openssl", "3.0.13-0ubuntu3.4", "openssl", "3.0.13-0ubuntu3.4"),
+            InstalledPackage("libfoo", "1.0-1", "libfoo", "1.0-1"),
+        ])
+
+    def test_parse_installed_dedupes_multiarch(self):
+        line = "ii  libc6 2.39-0ubuntu8 glibc 2.39-0ubuntu8\n"
+        self.assertEqual(len(parse_installed(line * 2)), 1)
+
+    def test_parse_os(self):
+        self.assertEqual(parse_os("24.04\nnoble"), ("24.04", "noble"))
+        self.assertEqual(parse_os("24.04"), ("24.04", None))
+
+    def test_parse_origins(self):
+        self.assertEqual(parse_origins("openssl 1.0\n\nfoo 2\n"), {("openssl", "1.0"), ("foo", "2")})
+
+    def test_build_host_report_new_fields(self):
+        report = build_host_report("w", fixture("remote_output.txt"))
+        self.assertEqual((report.os_version, report.codename), ("24.04", "noble"))
+        self.assertEqual(report.kernel_release, "6.8.0-45-generic")
+        self.assertIn(("openssl", "3.0.13-0ubuntu3.4"), report.ubuntu_origin)
+        self.assertNotIn("docker-ce", {name for name, _ in report.ubuntu_origin})
+        self.assertIsNone(report.vuln_check_problem)
+        self.assertEqual(report.open_vulns, [])
+
+    def test_vuln_check_problems(self):
+        base = "===SECTION os===\n24.04\nnoble\n===SECTION installed===\nii  a 1 a 1\n"
+        self.assertEqual(build_host_report("h", "===SECTION os===\n24.04\n===END===").vuln_check_problem, "kein Ubuntu-Codename")
+        self.assertEqual(build_host_report("h", "===SECTION os===\n24.04\nnoble\n===END===").vuln_check_problem, "keine Paketliste")
+        self.assertEqual(build_host_report("h", base + "===END===").vuln_check_problem, "Paketherkunft nicht ermittelbar")
+        self.assertEqual(build_host_report("h", base + "===SECTION origins===\na 1\n===END===").vuln_check_problem, None)
+
+    def test_error_leaves_problem_none(self):
+        self.assertIsNone(build_host_report("h", "", error="x").vuln_check_problem)
 
 
 if __name__ == "__main__":

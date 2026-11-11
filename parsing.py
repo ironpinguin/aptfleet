@@ -107,6 +107,26 @@ class PackageReport:
 
 
 @dataclass
+class InstalledPackage:
+    binary: str
+    version: str
+    source: str
+    source_version: str
+
+
+@dataclass
+class OpenVuln:
+    source: str
+    binaries: list[str]  # Anzeige-Binärpaket = binaries[0]
+    installed_version: str
+    cve_id: str
+    priority: str | None
+    status: str
+    kev: bool
+    is_kernel: bool = False
+
+
+@dataclass
 class HostReport:
     host: str
     os_version: str | None = None
@@ -114,6 +134,46 @@ class HostReport:
     error: str | None = None
     warnings: list[str] = field(default_factory=list)
     unparsed: list[str] = field(default_factory=list)
+    codename: str | None = None
+    installed: list[InstalledPackage] = field(default_factory=list)
+    ubuntu_origin: set[tuple[str, str]] = field(default_factory=set)
+    kernel_release: str | None = None
+    open_vulns: list[OpenVuln] = field(default_factory=list)
+    vuln_check_problem: str | None = None
+
+
+def parse_installed(text: str) -> list[InstalledPackage]:
+    """Zeilen `<status> <binary> <version> [<source> <source_version>]`; nur Status `ii`."""
+    result: list[InstalledPackage] = []
+    seen: set[tuple[str, str]] = set()
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 3 or parts[0] != "ii":
+            continue
+        binary, version = parts[1], parts[2]
+        source = parts[3] if len(parts) > 3 else binary
+        source_version = parts[4] if len(parts) > 4 else version
+        if (binary, version) in seen:
+            continue
+        seen.add((binary, version))
+        result.append(InstalledPackage(binary, version, source, source_version))
+    return result
+
+
+def parse_origins(text: str) -> set[tuple[str, str]]:
+    origins: set[tuple[str, str]] = set()
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            origins.add((parts[0], parts[1]))
+    return origins
+
+
+def parse_os(text: str) -> tuple[str | None, str | None]:
+    lines = [line.strip() for line in text.splitlines()]
+    version = lines[0] if lines and lines[0] else None
+    codename = lines[1] if len(lines) > 1 and lines[1] else None
+    return version, codename
 
 
 def parse_changelog(text: str) -> list[ChangelogEntry]:
@@ -155,7 +215,17 @@ def build_host_report(host: str, raw_output: str, error: str | None = None) -> H
         return HostReport(host=host, error=error)
 
     sections = split_sections(raw_output)
-    report = HostReport(host=host, os_version=sections.get("os", "").strip() or None)
+    os_version, codename = parse_os(sections.get("os", ""))
+    report = HostReport(host=host, os_version=os_version, codename=codename)
+    report.installed = parse_installed(sections.get("installed", ""))
+    report.ubuntu_origin = parse_origins(sections.get("origins", ""))
+    report.kernel_release = sections.get("kernel", "").strip() or None
+    if not codename:
+        report.vuln_check_problem = "kein Ubuntu-Codename"
+    elif not report.installed:
+        report.vuln_check_problem = "keine Paketliste"
+    elif not report.ubuntu_origin:
+        report.vuln_check_problem = "Paketherkunft nicht ermittelbar"
 
     apt_update = sections.get("apt_update")
     if apt_update is not None:
