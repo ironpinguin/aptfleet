@@ -174,6 +174,83 @@ class RenderReportTest(unittest.TestCase):
         self.assertIn("1 offene Lücke ━━", out.splitlines()[0])
         self.assertTrue(out.endswith("1 offene Lücke (0 KEV)"))
 
+    @staticmethod
+    def _kernel(cve_id, prio="high", status="kein Fix", kev=False):
+        return OpenVuln("linux", ["linux-image-6.8.0-149-generic"], "6.8.0-149.149", cve_id, prio, status, kev,
+                        is_kernel=True)
+
+    @staticmethod
+    def _pkg_vuln(cve_id="CVE-2025-49844"):
+        return OpenVuln("lua5.1", ["liblua5.1-0"], "5.1.5-9build2", cve_id, "high", "kein Fix", False)
+
+    def _kernel_report(self, vulns) -> HostReport:
+        r = single("tzdata", ["noble-updates"], [])
+        r.open_vulns = vulns
+        return r
+
+    def test_kernel_vulns_are_summarized(self):
+        r = self._kernel_report([
+            self._kernel("CVE-2026-0001", "critical"), self._kernel("CVE-2026-0002"),
+            self._kernel("CVE-2026-0003"), self._pkg_vuln(),
+        ])
+        out = render_report([r], {})
+        lines = out.splitlines()
+        kernel_lines = [ln for ln in lines if "linux (Kernel)" in ln]
+        self.assertEqual(len(kernel_lines), 1)
+        self.assertIn("3 CVEs (1 critical, 2 high)", kernel_lines[0])
+        self.assertTrue(kernel_lines[0].endswith("kein Fix – Liste mit --details"))
+        self.assertTrue(kernel_lines[0].startswith("      linux (Kernel)"))
+        for n in (1, 2, 3):
+            self.assertNotIn(f"CVE-2026-000{n}", out)
+        self.assertIn("4 offene Lücken", lines[0])
+        self.assertIn("4 offene Lücken (0 KEV)", lines[-1])
+
+    def test_kev_kernel_vuln_stays_single(self):
+        r = self._kernel_report([
+            self._kernel("CVE-2026-9999", "high", kev=True),
+            self._kernel("CVE-2026-0001", "critical"), self._kernel("CVE-2026-0002"),
+        ])
+        out = render_report([r], {})
+        kev_lines = [ln for ln in out.splitlines() if "CVE-2026-9999" in ln]
+        self.assertEqual(len(kev_lines), 1)
+        self.assertTrue(kev_lines[0].startswith(" KEV  linux (Kernel)"))
+        self.assertIn("2 CVEs (1 critical, 1 high)", out)
+
+    def test_single_kernel_vuln_not_summarized(self):
+        r = self._kernel_report([self._kernel("CVE-2026-0001")])
+        out = render_report([r], {})
+        self.assertIn("CVE-2026-0001 (high)", out)
+        self.assertNotIn("Liste mit --details", out)
+
+    def test_different_status_separate_groups(self):
+        later = "Fix 6.8.0-150.150 nicht angeboten"
+        r = self._kernel_report([
+            self._kernel("CVE-2026-0001"), self._kernel("CVE-2026-0002"),
+            self._kernel("CVE-2026-0003", status=later), self._kernel("CVE-2026-0004", status=later),
+        ])
+        lines = [ln for ln in render_report([r], {}).splitlines() if "linux (Kernel)" in ln]
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(lines[0].endswith("kein Fix – Liste mit --details"))
+        self.assertTrue(lines[1].endswith(f"{later} – Liste mit --details"))
+        self.assertTrue(all("2 CVEs (2 high)" in ln for ln in lines))
+
+    def test_details_lists_all_kernel_vulns(self):
+        r = self._kernel_report([self._kernel("CVE-2026-0001", "critical"), self._kernel("CVE-2026-0002")])
+        out = render_report([r], {}, details=True)
+        self.assertIn("CVE-2026-0001 (critical)", out)
+        self.assertIn("CVE-2026-0002 (high)", out)
+        self.assertNotIn("Liste mit --details", out)
+        self.assertNotIn("2 CVEs", out)
+
+    def test_summary_row_position_is_first_group_member(self):
+        r = self._kernel_report([
+            self._kernel("CVE-2026-0001", "critical"), self._pkg_vuln(), self._kernel("CVE-2026-0002"),
+        ])
+        lines = render_report([r], {}).splitlines()
+        i = lines.index("   Offene Lücken ohne Fix:")
+        self.assertIn("linux (Kernel)", lines[i + 1])
+        self.assertIn("liblua5.1-0", lines[i + 2])
+
     def test_header_without_anything(self):
         out = render_report([HostReport("git-ansible", os_version="22.04")], {})
         self.assertIn("━━ git-ansible (Ubuntu 22.04) — keine Updates, keine offenen Lücken ━━", out)

@@ -84,30 +84,54 @@ def _details(pkg: PackageReport, cves: dict[str, CveInfo], kev: dict[str, KevEnt
     return lines
 
 
+def _priority_summary(group: list[OpenVuln]) -> str:
+    counts: dict[str, int] = {}
+    for v in group:
+        key = v.priority or "unbekannt"
+        counts[key] = counts.get(key, 0) + 1
+    order = [p for p in ("critical", "high") if p in counts]
+    order += sorted(p for p in counts if p not in ("critical", "high"))
+    return f"{len(group)} CVEs ({', '.join(f'{counts[p]} {p}' for p in order)})"
+
+
+def _open_vuln_rows(vulns: list[OpenVuln], details: bool) -> list[tuple[OpenVuln, str, str, str, str, bool]]:
+    """Wandelt die sortierte Lückenliste in Anzeigezeilen (v, Name, Version, CVE-Text, Status, Sammelzeile)."""
+    groups: dict[tuple[str, str, str], list[OpenVuln]] = {}
+    if not details:
+        for v in vulns:
+            if v.is_kernel and not v.kev:
+                groups.setdefault((v.source, v.installed_version, v.status), []).append(v)
+    rows = []
+    emitted: set[tuple[str, str, str]] = set()
+    for v in vulns:
+        key = (v.source, v.installed_version, v.status)
+        group = groups.get(key) if v.is_kernel and not v.kev else None
+        if group and len(group) >= 2:
+            if key not in emitted:
+                emitted.add(key)
+                rows.append((v, f"{v.source} (Kernel)", v.installed_version, _priority_summary(group),
+                             f"{v.status} – Liste mit --details", True))
+            continue
+        name = f"{v.source} (Kernel)" if v.is_kernel else v.binaries[0]
+        cve_text = f"{v.cve_id} ({v.priority})" if v.priority else v.cve_id
+        rows.append((v, name, v.installed_version, cve_text, v.status, False))
+    return rows
+
+
 def _open_vuln_lines(
     report: HostReport, cves: dict[str, CveInfo], details: bool, kev: dict[str, KevEntry], color: bool
 ) -> list[str]:
-    vulns = sorted(
-        report.open_vulns,
-        key=lambda v: (not v.kev, priority_rank(v.priority), v.source, v.cve_id),
-    )
-
-    def name(v: OpenVuln) -> str:
-        return f"{v.source} (Kernel)" if v.is_kernel else v.binaries[0]
-
-    cve_texts = [f"{v.cve_id} ({v.priority})" if v.priority else v.cve_id for v in vulns]
-    name_width = max(len(name(v)) for v in vulns)
-    version_width = max(len(v.installed_version) for v in vulns)
-    cve_width = max(len(t) for t in cve_texts)
+    # report.open_vulns kommt bereits sortiert aus vulns.find_open_vulns
+    rows = _open_vuln_rows(report.open_vulns, details)
+    name_width = max(len(r[1]) for r in rows)
+    version_width = max(len(r[2]) for r in rows)
+    cve_width = max(len(r[3]) for r in rows)
     lines = ["   Offene Lücken ohne Fix:"]
-    for v, cve_text in zip(vulns, cve_texts):
+    for v, name, version, cve_text, status, summarized in rows:
         tag = _c(" KEV", RED + BOLD, color) if v.kev else "    "
-        line = (
-            f"{tag}  {name(v):<{name_width}}  {v.installed_version:<{version_width}}  "
-            f"{cve_text:<{cve_width}}  {v.status}"
-        )
+        line = f"{tag}  {name:<{name_width}}  {version:<{version_width}}  {cve_text:<{cve_width}}  {status}"
         lines.append(line.rstrip())
-        if details:
+        if details and not summarized:
             lines.extend(_cve_detail_lines(v.cve_id, cves, kev))
     return lines
 
