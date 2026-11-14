@@ -60,6 +60,10 @@ class InventoryTest(unittest.TestCase):
         )
         self.assertEqual(read_inventory(self.inventory), ["host-a", "host-b", "db-1", "web-1"])
 
+    def test_read_inventory_drops_duplicates_keeping_first_position(self):
+        self.inventory.write_text("[web]\nhost-a\nhost-b\n[db]\nhost-c\nhost-a ansible_port=22\n")
+        self.assertEqual(read_inventory(self.inventory), ["host-a", "host-b", "host-c"])
+
     def test_select_hosts_keeps_inventory_order(self):
         inventory = read_inventory(self.inventory)
         self.assertEqual(select_hosts(inventory, []), inventory)

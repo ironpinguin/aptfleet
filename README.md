@@ -126,8 +126,8 @@ Regeln:
   **ignoriert**. Der Name wird so an `ssh` übergeben. Er muss also ein Alias aus der
   SSH-Config, ein auflösbarer Hostname oder eine IP sein. Im Beispiel oben verbindet sich
   das Skript zu `db-1`, nicht zu `10.0.0.20`.
-- Steht ein Host in mehreren Gruppen, wird er mehrfach geprüft. Also jeden Host nur
-  einmal eintragen.
+- Steht ein Host in mehreren Gruppen, wird er trotzdem nur einmal geprüft, an der
+  Stelle seines ersten Auftretens.
 - YAML-Inventories werden nicht unterstützt.
 
 ### SSH-Config

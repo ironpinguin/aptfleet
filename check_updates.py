@@ -23,7 +23,8 @@ DEFAULT_TIMEOUT = 120
 
 
 def read_inventory(path: Path) -> list[str]:
-    """Hosts aus einem Ansible-INI-Inventory; [x:vars] und [x:children] enthalten keine Hosts."""
+    """Hosts aus einem Ansible-INI-Inventory, ohne Duplikate in Reihenfolge des ersten
+    Auftretens; [x:vars] und [x:children] enthalten keine Hosts."""
     hosts: list[str] = []
     in_host_section = True
     for line in Path(path).read_text().splitlines():
@@ -36,7 +37,7 @@ def read_inventory(path: Path) -> list[str]:
         name = line.split()[0]
         if in_host_section and "=" not in name:
             hosts.append(name)
-    return hosts
+    return list(dict.fromkeys(hosts))
 
 
 def select_hosts(inventory: list[str], requested: list[str]) -> list[str]:
