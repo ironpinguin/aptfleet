@@ -105,22 +105,29 @@ host-b              # Kommentar hinter dem Host ist erlaubt
 
 [datenbanken]
 db-1 ansible_host=10.0.0.20
+
+[all:vars]
+ansible_user=ansiadm   # wird ignoriert
+
+[server:children]
+ubuntu                 # Gruppennamen, keine Hosts – wird ignoriert
 ```
 
 Regeln:
 
 - Ein Host pro Zeile. Es zählt nur das **erste Wort** der Zeile.
 - Leerzeilen und Zeilen, die mit `#` beginnen, werden übersprungen.
-- Zeilen, die mit `[` beginnen (`[gruppe]`, `[gruppe:children]`, `[gruppe:vars]`),
-  werden übersprungen. **Gruppen haben keine Bedeutung:** Es werden alle Hosts aus allen
-  Gruppen geprüft. Nur einzelne Hosts lassen sich mit `--host` auswählen.
+- Gruppenköpfe wie `[gruppe]` werden übersprungen. **Gruppen haben keine Bedeutung:** Es
+  werden alle Hosts aus allen Gruppen geprüft. Nur einzelne Hosts lassen sich mit
+  `--host` auswählen.
+- Der Inhalt von `[gruppe:vars]` (Variablen) und `[gruppe:children]` (Gruppennamen) wird
+  komplett übersprungen, ebenso jede Zeile, deren erstes Wort ein `=` enthält.
 - Ansible-Variablen hinter dem Namen (`ansible_host=`, `ansible_user=` …) werden
   **ignoriert**. Der Name wird so an `ssh` übergeben. Er muss also ein Alias aus der
   SSH-Config, ein auflösbarer Hostname oder eine IP sein. Im Beispiel oben verbindet sich
   das Skript zu `db-1`, nicht zu `10.0.0.20`.
 - Steht ein Host in mehreren Gruppen, wird er mehrfach geprüft. Also jeden Host nur
   einmal eintragen.
-- Unter `[gruppe:vars]` dürfen keine Variablen stehen, sonst gelten sie als Hosts.
 - YAML-Inventories werden nicht unterstützt.
 
 ### SSH-Config

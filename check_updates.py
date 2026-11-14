@@ -23,12 +23,19 @@ DEFAULT_TIMEOUT = 120
 
 
 def read_inventory(path: Path) -> list[str]:
+    """Hosts aus einem Ansible-INI-Inventory; [x:vars] und [x:children] enthalten keine Hosts."""
     hosts: list[str] = []
+    in_host_section = True
     for line in Path(path).read_text().splitlines():
         line = line.strip()
-        if not line or line.startswith("#") or line.startswith("["):
+        if not line or line.startswith("#"):
             continue
-        hosts.append(line.split()[0])
+        if line.startswith("["):
+            in_host_section = not line.strip("[] ").endswith((":vars", ":children"))
+            continue
+        name = line.split()[0]
+        if in_host_section and "=" not in name:
+            hosts.append(name)
     return hosts
 
 

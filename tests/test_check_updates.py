@@ -48,6 +48,18 @@ class InventoryTest(unittest.TestCase):
             ["rootserver-ansible", "webserver-ansible", "pdf-ansible"],
         )
 
+    def test_read_inventory_skips_vars_and_children_sections(self):
+        self.inventory.write_text(
+            "ansible_user=ansiadm\n"
+            "[ubuntu]\nhost-a\nhost-b  # Kommentar\n"
+            "[all:vars]\nansible_user=ansiadm\nansible_python_interpreter = /usr/bin/python3\n"
+            "[db]\ndb-1 ansible_host=10.0.0.20\n"
+            "[server:children]\nubuntu\ndb\n"
+            "[ ubuntu:vars ]\nfoo=bar\n"
+            "[web]\nweb-1\n"
+        )
+        self.assertEqual(read_inventory(self.inventory), ["host-a", "host-b", "db-1", "web-1"])
+
     def test_select_hosts_keeps_inventory_order(self):
         inventory = read_inventory(self.inventory)
         self.assertEqual(select_hosts(inventory, []), inventory)
