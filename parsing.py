@@ -1,6 +1,7 @@
 """Parsing der Remote-Ausgabe (reine Funktionen, kein I/O)."""
 from __future__ import annotations
 
+import datetime
 import re
 from dataclasses import dataclass, field
 
@@ -142,6 +143,8 @@ class HostReport:
     kernel_release: str | None = None
     open_vulns: list[OpenVuln] = field(default_factory=list)
     vuln_check_problem: str | None = None
+    lists_updated: int | None = None  # Epoche (Host-Uhr) der letzten Paketlisten-Aktualisierung
+    lists_age: int | None = None  # Sekunden seit lists_updated
 
     def is_ubuntu_package(self, pkg: InstalledPackage) -> bool:
         return (pkg.binary, pkg.version) in self.ubuntu_origin or pkg.binary in self.ubuntu_names
@@ -201,6 +204,39 @@ def parse_os(text: str) -> tuple[str | None, str | None]:
     return version, codename
 
 
+def parse_lists_age(text: str) -> tuple[int | None, int | None]:
+    """Neuester Zeitstempel der Paketlisten und dessen Alter in Sekunden (Host-Uhr)."""
+    now: int | None = None
+    stamps: list[int] = []
+    for line in text.splitlines():
+        key, _, value = line.partition(" ")
+        if not value.strip().isdigit():
+            continue
+        if key == "now":
+            now = int(value)
+        elif key in ("stamp", "partial", "lists"):
+            stamps.append(int(value))
+    if now is None or not stamps:
+        return None, None
+    updated = max(stamps)
+    return updated, max(0, now - updated)
+
+
+def format_age(seconds: int) -> str:
+    if seconds < 3600:
+        return f"vor {seconds // 60} Min."
+    if seconds < 48 * 3600:
+        return f"vor {seconds // 3600} Std."
+    return f"vor {seconds // 86400} Tagen"
+
+
+def _lists_state(report: HostReport) -> str:
+    if report.lists_updated is None or report.lists_age is None:
+        return "Stand unbekannt"
+    when = datetime.datetime.fromtimestamp(report.lists_updated).strftime("%Y-%m-%d %H:%M")
+    return f"Stand {when} ({format_age(report.lists_age)})"
+
+
 def parse_changelog(text: str) -> list[ChangelogEntry]:
     entries: list[ChangelogEntry] = []
     version: str | None = None
@@ -257,15 +293,21 @@ def build_host_report(host: str, raw_output: str, error: str | None = None) -> H
         release = report.kernel_release
         report.vuln_check_problem = f"Kernel-Prüfung nicht möglich: kein Paket für {release}"
 
+    report.lists_updated, report.lists_age = parse_lists_age(sections.get("lists_age", ""))
     apt_update = sections.get("apt_update")
     if apt_update is not None:
         lines = apt_update.splitlines()
         rc_line = lines[0] if lines else ""
-        if rc_line != "rc=0":
+        if rc_line == "rc=skipped":
+            report.warnings.append(
+                f"Paketlisten nicht aktualisiert (--no-refresh), {_lists_state(report)}"
+                " – Updates und Security-Infos können veraltet sein"
+            )
+        elif rc_line != "rc=0":
             detail = next((line for line in lines[1:] if line.strip()), "keine Details")
             report.warnings.append(
                 f"apt-get update fehlgeschlagen ({rc_line or 'rc=?'}): {detail}"
-                " – nutze vorhandenen Paket-Cache"
+                f" – nutze vorhandene Paketlisten, {_lists_state(report)}"
             )
 
     if "timeout" in sections:

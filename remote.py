@@ -39,6 +39,7 @@ awk 'g == "" { want[$1" "$2]=1; name[$1]=1; next }
      END { for (p in inu) if (!(p in inf) && !(p in hit)) print p" *" }' - g=u $ubuntu g=f $foreign"""
 
 # Wird per stdin an `bash -s -- <refresh 0|1> [paket ...]` übergeben; legt nichts auf dem Host ab.
+# Ohne Refresh braucht das Skript kein sudo.
 # Alle Befehle bekommen </dev/null, damit sie nicht den Rest des Skripts von stdin lesen.
 REMOTE_SCRIPT = r"""
 export LC_ALL=C
@@ -49,13 +50,30 @@ FILTER=" $* "
 echo "===SECTION os==="
 ( . /etc/os-release 2>/dev/null && echo "${VERSION_ID:-}" && echo "${VERSION_CODENAME:-}" )
 
+echo "===SECTION apt_update==="
 if [ "$REFRESH" = "1" ]; then
-  echo "===SECTION apt_update==="
   out=$(timeout 90 sudo -n apt-get update -qq </dev/null 2>&1)
   rc=$?
   echo "rc=$rc"
   [ -n "$out" ] && printf '%s\n' "$out"
+else
+  echo "rc=skipped"
 fi
+
+# Stand der Paketlisten: "now <epoch>", danach Epochen der Update-Stempel
+# (update-notifier/apt.systemd.daily), von lists/partial (ändert apt bei jedem Update)
+# und der neuesten Release-Datei (trägt nur das Veröffentlichungsdatum des Servers).
+echo "===SECTION lists_age==="
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
+echo "now $(date +%s)"
+periodic="${APT_PERIODIC:-/var/lib/apt/periodic}"
+for stamp in "$periodic/update-success-stamp" "$periodic/update-stamp"; do
+  [ -f "$stamp" ] && echo "stamp $(mtime "$stamp")"
+done
+lists_dir="${APT_LISTS:-/var/lib/apt/lists}"
+[ -d "$lists_dir/partial" ] && echo "partial $(mtime "$lists_dir/partial")"
+newest=$(ls -t "$lists_dir"/*Release 2>/dev/null </dev/null | head -n 1)
+[ -n "$newest" ] && echo "lists $(mtime "$newest")"
 
 echo "===SECTION upgradable==="
 pkgs=""

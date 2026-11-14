@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import unittest
 from pathlib import Path
 
@@ -9,9 +10,11 @@ from parsing import (
     Upgrade,
     build_host_report,
     extract_cves,
+    format_age,
     new_changelog_entries,
     parse_changelog,
     parse_installed,
+    parse_lists_age,
     parse_origins,
     parse_os,
     parse_sources,
@@ -20,6 +23,10 @@ from parsing import (
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def local_time(epoch: int) -> str:
+    return datetime.datetime.fromtimestamp(epoch).strftime("%Y-%m-%d %H:%M")
 
 
 def fixture(name: str) -> str:
@@ -223,6 +230,7 @@ class BuildHostReportTest(unittest.TestCase):
             "===SECTION os===\n22.04\n"
             "===SECTION apt_update===\nrc=100\n"
             "E: Could not get lock /var/lib/apt/lists/lock\n"
+            "===SECTION lists_age===\nnow 1763100000\nlists 1762900000\n"
             "===SECTION upgradable===\n"
             "tzdata/jammy-updates 2025b-0ubuntu0.22.04.1 all "
             "[upgradable from: 2025a-0ubuntu0.22.04]\n"
@@ -234,11 +242,65 @@ class BuildHostReportTest(unittest.TestCase):
             report.warnings,
             [
                 "apt-get update fehlgeschlagen (rc=100): "
-                "E: Could not get lock /var/lib/apt/lists/lock – nutze vorhandenen Paket-Cache"
+                "E: Could not get lock /var/lib/apt/lists/lock – nutze vorhandene Paketlisten, "
+                f"Stand {local_time(1762900000)} (vor 2 Tagen)"
             ],
         )
         self.assertEqual(len(report.packages), 1)
         self.assertFalse(report.packages[0].changelog_available)
+
+    def test_skipped_apt_update_warns_with_lists_age(self):
+        raw = (
+            "===SECTION apt_update===\nrc=skipped\n"
+            "===SECTION lists_age===\nnow 1763100000\nstamp 1763092800\nlists 1763000000\n"
+            "===END===\n"
+        )
+        report = build_host_report("git-ansible", raw)
+        self.assertEqual(report.lists_updated, 1763092800)
+        self.assertEqual(report.lists_age, 7200)
+        self.assertEqual(
+            report.warnings,
+            [
+                f"Paketlisten nicht aktualisiert (--no-refresh), Stand {local_time(1763092800)}"
+                " (vor 2 Std.) – Updates und Security-Infos können veraltet sein"
+            ],
+        )
+
+    def test_skipped_apt_update_with_unknown_lists_age(self):
+        raw = "===SECTION apt_update===\nrc=skipped\n===SECTION lists_age===\nnow 1763100000\n===END===\n"
+        report = build_host_report("git-ansible", raw)
+        self.assertIsNone(report.lists_age)
+        self.assertEqual(
+            report.warnings,
+            [
+                "Paketlisten nicht aktualisiert (--no-refresh), Stand unbekannt"
+                " – Updates und Security-Infos können veraltet sein"
+            ],
+        )
+
+    def test_successful_apt_update_has_no_warning(self):
+        raw = (
+            "===SECTION apt_update===\nrc=0\n"
+            "===SECTION lists_age===\nnow 1763100000\nstamp 1763100000\n===END===\n"
+        )
+        report = build_host_report("git-ansible", raw)
+        self.assertEqual(report.warnings, [])
+        self.assertEqual(report.lists_age, 0)
+
+    def test_parse_lists_age(self):
+        self.assertEqual(parse_lists_age("now 100\nstamp 40\nlists 70\n"), (70, 30))
+        self.assertEqual(parse_lists_age("now 100\nlists 130\n"), (130, 0))
+        self.assertEqual(parse_lists_age("now 100\npartial 90\nlists 20\n"), (90, 10))
+        self.assertEqual(parse_lists_age("now 100\nstamp \n"), (None, None))
+        self.assertEqual(parse_lists_age("stamp 40\n"), (None, None))
+        self.assertEqual(parse_lists_age(""), (None, None))
+
+    def test_format_age(self):
+        self.assertEqual(format_age(59), "vor 0 Min.")
+        self.assertEqual(format_age(3599), "vor 59 Min.")
+        self.assertEqual(format_age(3600), "vor 1 Std.")
+        self.assertEqual(format_age(48 * 3600 - 1), "vor 47 Std.")
+        self.assertEqual(format_age(48 * 3600), "vor 2 Tagen")
 
     def test_no_refresh_has_no_warning_and_missing_os_is_none(self):
         raw = "===SECTION upgradable===\n===SECTION sources===\n===END===\n"

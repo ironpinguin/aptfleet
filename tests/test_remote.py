@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import stat
 import subprocess
 import tempfile
@@ -88,7 +89,7 @@ class RemoteScriptTest(unittest.TestCase):
         self._tmp.cleanup()
         self._lists.cleanup()
 
-    def run_script(self, *args: str) -> str:
+    def run_script(self, *args: str, env: dict[str, str] | None = None) -> str:
         proc = subprocess.run(
             ["bash", "-s", "--", *args],
             input=REMOTE_SCRIPT,
@@ -98,6 +99,8 @@ class RemoteScriptTest(unittest.TestCase):
                 "PATH": f"{self.stub_dir}:/usr/bin:/bin",
                 "LANG": "de_DE.UTF-8",
                 "APT_LISTS": str(self.lists_dir),
+                "APT_PERIODIC": str(self.stub_dir / "periodic"),
+                **(env or {}),
             },
             timeout=30,
         )
@@ -124,7 +127,7 @@ class RemoteScriptTest(unittest.TestCase):
 
     def test_no_refresh_and_package_filter(self):
         sections = split_sections(self.run_script("0", "tzdata"))
-        self.assertNotIn("apt_update", sections)
+        self.assertEqual(sections["apt_update"], "rc=skipped")
         self.assertEqual(
             sections["upgradable"],
             "tzdata/noble-updates 2025b-0ubuntu0.24.04.1 all [upgradable from: 2025a-0ubuntu0.24.04]",
@@ -145,6 +148,42 @@ class RemoteScriptTest(unittest.TestCase):
     def test_package_filter_does_not_limit_installed(self):
         sections = split_sections(self.run_script("0", "tzdata"))
         self.assertIn("openssl", sections["installed"])
+
+    def test_lists_age_uses_newest_release_file(self):
+        release = self.lists_dir / "archive.ubuntu.com_ubuntu_dists_noble-updates_InRelease"
+        os.utime(release, (1762900000, 1762900000))
+        for f in self.lists_dir.iterdir():
+            if f != release:
+                os.utime(f, (1762000000, 1762000000))
+        lines = split_sections(self.run_script("0"))["lists_age"].splitlines()
+        self.assertRegex(lines[0], r"^now \d+$")
+        self.assertEqual(lines[1:], ["lists 1762900000"])
+
+    def test_lists_age_reports_update_stamps(self):
+        periodic = self.stub_dir / "periodic"
+        periodic.mkdir()
+        (periodic / "update-success-stamp").touch()
+        os.utime(periodic / "update-success-stamp", (1763000000, 1763000000))
+        lines = split_sections(self.run_script("0"))["lists_age"].splitlines()
+        self.assertIn("stamp 1763000000", lines)
+
+    def test_lists_age_reports_partial_dir(self):
+        partial = self.lists_dir / "partial"
+        partial.mkdir()
+        os.utime(partial, (1763050000, 1763050000))
+        lines = split_sections(self.run_script("0"))["lists_age"].splitlines()
+        self.assertIn("partial 1763050000", lines)
+
+    def test_lists_age_without_lists_has_only_now(self):
+        for f in self.lists_dir.iterdir():
+            f.unlink()
+        lines = split_sections(self.run_script("0"))["lists_age"].splitlines()
+        self.assertEqual(len(lines), 1)
+
+    def test_no_refresh_does_not_use_sudo(self):
+        (self.stub_dir / "sudo").write_text("#!/bin/sh\necho SUDO-CALLED\nexit 1\n")
+        (self.stub_dir / "sudo").chmod(0o755)
+        self.assertNotIn("SUDO-CALLED", self.run_script("0"))
 
     def test_os_prints_codename(self):
         self.assertIn("VERSION_CODENAME", REMOTE_SCRIPT)
