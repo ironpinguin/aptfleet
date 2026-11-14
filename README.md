@@ -30,7 +30,7 @@ kommt per stdin, auf dem Host wird nichts abgelegt.
 
 - Ubuntu mit `bash`, `apt`, `dpkg-query`, `timeout` (Standardinstallation)
 - Für das `apt-get update` vor der Prüfung: `sudo` ohne Passwort für den SSH-User.
-  Ohne das mit `--no-refresh` aufrufen; dann gelten die vorhandenen Paketlisten
+  Ohne sudo-Rechte mit `--no-refresh` aufrufen (siehe [Betrieb ohne sudo](#betrieb-ohne-sudo))
 
 ## Installation
 
@@ -43,20 +43,34 @@ cp -r updates_report ~/tools/
 
 ## Hosts festlegen
 
-Es gibt zwei Betriebsarten.
+Es gibt drei Wege.
 
 ### 1. Ad hoc: `--host` + `--user`
 
-Hosts direkt angeben. Es gilt die normale `~/.ssh/config` (Aliase, Keys, `ProxyJump`):
+Hosts direkt angeben. Es gilt die normale `~/.ssh/config` (Aliase, Keys, `ProxyJump`),
+außer es wird `--ssh-config` angegeben:
 
 ```bash
 ./check_updates.py --user admin --host web1.example.com --host 10.0.0.12
 ./check_updates.py --user ansiadm --host mein-alias-aus-ssh-config
 ```
 
-### 2. Inventory im Elternverzeichnis
+### 2. Eigenes Inventory: `--inventory` / `--ssh-config`
 
-Ohne `--user` liest das Skript zwei Dateien aus dem Verzeichnis **über** `updates_report/`:
+Inventory und SSH-Config können irgendwo liegen:
+
+```bash
+./check_updates.py --inventory ~/etc/hosts.ini --ssh-config ~/etc/ssh_hosts.conf
+./check_updates.py --inventory ~/etc/hosts.ini     # SSH über ~/.ssh/config
+```
+
+Ohne `--ssh-config` wird die Default-Datei (siehe 3.) genutzt, falls sie existiert,
+sonst die normale `~/.ssh/config`.
+
+### 3. Defaults im Elternverzeichnis
+
+Ohne `--user` und `--inventory` liest das Skript zwei Dateien aus dem Verzeichnis
+**über** `updates_report/`:
 
 ```
 <projekt>/
@@ -66,7 +80,7 @@ Ohne `--user` liest das Skript zwei Dateien aus dem Verzeichnis **über** `updat
     └── check_updates.py
 ```
 
-`virtualhosts` (Ansible-INI-Format, ein Host pro Zeile; `#`-Zeilen und `[gruppen]`
+Das Inventory (Ansible-INI-Format, ein Host pro Zeile; `#`-Zeilen und `[gruppen]`
 werden ignoriert):
 
 ```ini
@@ -98,8 +112,8 @@ Dann prüft ein Aufruf alle Hosts:
 ./check_updates.py --host host-b      # nur einer (muss in virtualhosts stehen)
 ```
 
-Wenn `virtualhosts` fehlt, endet das Skript mit Exit-Code 2 und weist auf
-`--host`/`--user` hin.
+Fehlt das Inventory, endet das Skript mit Exit-Code 2 und nennt `--inventory` bzw.
+`--host`/`--user`.
 
 ## Aufruf und Optionen
 
@@ -109,12 +123,14 @@ Wenn `virtualhosts` fehlt, endet das Skript mit Exit-Code 2 und weist auf
 
 | Option | Wirkung |
 |---|---|
-| `--host NAME` | nur diesen Host prüfen, mehrfach möglich. Ohne `--user` muss der Name in `virtualhosts` stehen |
-| `--user NAME` | SSH-User. Nutzt die `--host`-Angaben direkt, ohne `virtualhosts` und ohne Repo-SSH-Config |
+| `--host NAME` | nur diesen Host prüfen, mehrfach möglich. Ohne `--user` muss der Name im Inventory stehen |
+| `--user NAME` | SSH-User. Nutzt die `--host`-Angaben direkt, ohne Inventory |
+| `--inventory PFAD` | Inventory-Datei (Default: `../virtualhosts`) |
+| `--ssh-config PFAD` | SSH-Config für `ssh -F` (Default: `../ssh_config_rootserver_ansible.conf`, falls vorhanden, sonst `~/.ssh/config`) |
 | `--security-only` | nur Security-Updates anzeigen |
 | `--details` | neue Changelog-Einträge der Updates anzeigen. Holt auch CVE-Infos für offene Lücken |
 | `--package NAME` | nur dieses Binärpaket, mehrfach möglich |
-| `--no-refresh` | kein `apt-get update` vorher, braucht dann kein sudo |
+| `--no-refresh` | kein `apt-get update` vorher, braucht dann kein sudo. Zeigt pro Host, wie alt die Paketlisten sind |
 | `--timeout SEKUNDEN` | Timeout pro Host (Default 120) |
 | `--verbose` | nicht parsebare Zeilen und Pakete ohne Ubuntu-Herkunft (PPAs, Fremd-Repos) anzeigen |
 | `--kev-recent [TAGE]` | in den letzten TAGE (Default 7) neu auf KEV aufgenommene CVEs auflisten |
@@ -130,6 +146,37 @@ Beispiele:
 
 Bis zu 6 Hosts werden parallel abgefragt. Die Ausgabe ist farbig, wenn sie in ein
 Terminal geht; bei Umleitung in eine Datei oder Pipe ist sie unformatiert.
+
+## Betrieb ohne sudo
+
+Das Skript braucht sudo nur für das `apt-get update` vor der Prüfung. Mit `--no-refresh`
+läuft es mit einem normalen User ohne sudo-Rechte. Ausgewertet werden dann die
+Paketlisten, die auf dem Host schon vorhanden sind. Ubuntu aktualisiert sie per
+`apt-daily.timer` normalerweise einmal am Tag.
+
+Weil die Infos dann veraltet sein können, steht bei jedem Host eine Warnung mit dem Stand:
+
+```
+━━ webserver (Ubuntu 24.04) — 3 Updates, 1 Security ━━
+  ⚠ Paketlisten nicht aktualisiert (--no-refresh), Stand 2026-11-12 06:12 (vor 2 Tagen) – Updates und Security-Infos können veraltet sein
+```
+
+Schlägt das Update ohne `--no-refresh` fehl (z. B. sudo verlangt ein Passwort), läuft der
+Report ebenfalls weiter, mit der Fehlermeldung und demselben Stand.
+
+Den Stand ermittelt das Skript aus dem neuesten dieser Zeitstempel auf dem Host:
+
+1. `/var/lib/apt/periodic/update-success-stamp` bzw. `update-stamp`
+   (von update-notifier bzw. `apt-daily`)
+2. Änderungszeit von `/var/lib/apt/lists/partial` (ändert apt bei jedem Update)
+3. neueste `*Release`-Datei in `/var/lib/apt/lists` (nur das Veröffentlichungsdatum des
+   Repos, daher ein grober Notbehelf)
+
+Findet es keinen davon, heißt es „Stand unbekannt“. Das Alter wird mit der Uhr des Hosts
+berechnet, eine abweichende lokale Uhr spielt also keine Rolle.
+
+Achtung beim Exit-Code: Bei alten Paketlisten kann er `0` sein, obwohl längst
+Security-Updates bereitstehen.
 
 ## Exit-Codes
 
