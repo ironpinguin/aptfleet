@@ -9,7 +9,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from check_updates import SSH_CONFIG, exit_code, main, read_inventory, select_hosts
+from check_updates import (
+    SSH_CONFIG,
+    exit_code,
+    main,
+    read_inventory,
+    resolve_ssh_config,
+    select_hosts,
+)
 from cve_info import CveInfo
 from kev import KevData, KevEntry
 from oval import OvalCve, OvalData
@@ -184,6 +191,32 @@ class MainTest(unittest.TestCase):
     def test_inventory_mode_passes_no_user(self):
         self.run_main("--host", "webserver-ansible")
         self.assertEqual(self.users, [None])
+
+    def test_inventory_option_overrides_default(self):
+        other = Path(self._tmp.name) / "hosts.ini"
+        other.write_text("[ubuntu]\nhost-a\nhost-b\n")
+        self.inventory = Path(self._tmp.name) / "gibtsnicht"
+        self.run_main("--inventory", str(other))
+        hosts, *_ = self.run_calls[0]
+        self.assertEqual(hosts, ["host-a", "host-b"])
+
+    def test_ssh_config_option_is_passed(self):
+        self.run_main("--host", "webserver-ansible", "--ssh-config", "/etc/my_ssh.conf")
+        _, ssh_config, *_ = self.run_calls[0]
+        self.assertEqual(ssh_config, Path("/etc/my_ssh.conf"))
+
+    def test_user_mode_accepts_ssh_config(self):
+        self.run_main("--user", "admin", "--host", "10.0.0.5", "--ssh-config", "/etc/my_ssh.conf")
+        _, ssh_config, *_ = self.run_calls[0]
+        self.assertEqual(ssh_config, Path("/etc/my_ssh.conf"))
+
+    def test_resolve_ssh_config(self):
+        existing = Path(self._tmp.name) / "ssh.conf"
+        existing.write_text("")
+        missing = Path(self._tmp.name) / "fehlt.conf"
+        self.assertEqual(resolve_ssh_config(None, existing), existing)
+        self.assertIsNone(resolve_ssh_config(None, missing))
+        self.assertEqual(resolve_ssh_config(missing, existing), missing)
 
     def test_missing_inventory_returns_2(self):
         self.inventory = Path(self._tmp.name) / "gibtsnicht"

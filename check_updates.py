@@ -37,8 +37,15 @@ def select_hosts(inventory: list[str], requested: list[str]) -> list[str]:
         return inventory
     unknown = [host for host in requested if host not in inventory]
     if unknown:
-        raise ValueError(f"Unbekannte Hosts (nicht in virtualhosts): {', '.join(unknown)}")
+        raise ValueError(f"Unbekannte Hosts (nicht im Inventory): {', '.join(unknown)}")
     return [host for host in inventory if host in requested]
+
+
+def resolve_ssh_config(explicit: Path | None, default: Path = SSH_CONFIG) -> Path | None:
+    """Ohne explizite Angabe die Repo-SSH-Config, falls vorhanden; sonst gilt ~/.ssh/config."""
+    if explicit is not None:
+        return explicit
+    return default if default.is_file() else None
 
 
 def exit_code(reports: list[HostReport], incomplete: bool = False) -> int:
@@ -90,6 +97,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--user", metavar="NAME",
                         help="SSH-User für --host; nutzt die Hosts direkt ohne virtualhosts "
                         "und ohne Repo-SSH-Config (es gilt ~/.ssh/config)")
+    parser.add_argument("--inventory", type=Path, metavar="PFAD",
+                        help=f"Inventory-Datei (Default {INVENTORY})")
+    parser.add_argument("--ssh-config", type=Path, metavar="PFAD",
+                        help=f"SSH-Config für ssh -F (Default {SSH_CONFIG}, falls vorhanden, "
+                        "sonst ~/.ssh/config; mit --user nur bei Angabe)")
     parser.add_argument("--security-only", action="store_true", help="nur Security-Updates anzeigen")
     parser.add_argument("--details", action="store_true", help="neue Changelog-Einträge anzeigen")
     parser.add_argument("--package", action="append", default=[], metavar="NAME",
@@ -121,18 +133,18 @@ def main(
         if not args.host:
             print("Fehler: --user benötigt mindestens ein --host", file=sys.stderr)
             return 2
-        hosts, ssh_config = list(dict.fromkeys(args.host)), None
+        hosts, ssh_config = list(dict.fromkeys(args.host)), args.ssh_config
     else:
         try:
-            hosts = select_hosts(read_inventory(inventory), args.host)
+            hosts = select_hosts(read_inventory(args.inventory or inventory), args.host)
         except OSError as exc:
-            print(f"Fehler: Inventory nicht lesbar ({exc}); alternativ --host und --user angeben",
+            print(f"Fehler: Inventory nicht lesbar ({exc}); --inventory oder --host und --user angeben",
                   file=sys.stderr)
             return 2
         except ValueError as exc:
             print(f"Fehler: {exc}", file=sys.stderr)
             return 2
-        ssh_config = SSH_CONFIG
+        ssh_config = resolve_ssh_config(args.ssh_config)
 
     results = run_all(
         hosts, ssh_config, not args.no_refresh, args.package, args.timeout, user=args.user
