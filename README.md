@@ -65,7 +65,8 @@ Inventory und SSH-Config können irgendwo liegen:
 ```
 
 Ohne `--ssh-config` wird die Default-Datei (siehe 3.) genutzt, falls sie existiert,
-sonst die normale `~/.ssh/config`.
+sonst die normale `~/.ssh/config`. Wie beide Dateien aussehen, steht unter
+[Inventory-Format](#inventory-format) und [SSH-Config](#ssh-config).
 
 ### 3. Defaults im Elternverzeichnis
 
@@ -80,17 +81,52 @@ Ohne `--user` und `--inventory` liest das Skript zwei Dateien aus dem Verzeichni
     └── check_updates.py
 ```
 
-Das Inventory (Ansible-INI-Format, ein Host pro Zeile; `#`-Zeilen und `[gruppen]`
-werden ignoriert):
+Dann prüft ein Aufruf alle Hosts:
 
-```ini
-[ubuntu]
-host-a
-host-b
-#host-c   (wird übersprungen)
+```bash
+./check_updates.py
+./check_updates.py --host host-b      # nur einer (muss im Inventory stehen)
 ```
 
-Die SSH-Config enthält die passenden `Host`-Blöcke:
+Fehlt das Inventory, endet das Skript mit Exit-Code 2 und nennt `--inventory` bzw.
+`--host`/`--user`.
+
+### Inventory-Format
+
+Eine Textdatei im Stil eines Ansible-INI-Inventories. Ein bestehendes Ansible-Inventory
+lässt sich in der Regel direkt verwenden:
+
+```ini
+# Kommentar
+[ubuntu]
+host-a
+host-b              # Kommentar hinter dem Host ist erlaubt
+#host-c             auskommentiert, wird übersprungen
+
+[datenbanken]
+db-1 ansible_host=10.0.0.20
+```
+
+Regeln:
+
+- Ein Host pro Zeile. Es zählt nur das **erste Wort** der Zeile.
+- Leerzeilen und Zeilen, die mit `#` beginnen, werden übersprungen.
+- Zeilen, die mit `[` beginnen (`[gruppe]`, `[gruppe:children]`, `[gruppe:vars]`),
+  werden übersprungen. **Gruppen haben keine Bedeutung:** Es werden alle Hosts aus allen
+  Gruppen geprüft. Nur einzelne Hosts lassen sich mit `--host` auswählen.
+- Ansible-Variablen hinter dem Namen (`ansible_host=`, `ansible_user=` …) werden
+  **ignoriert**. Der Name wird so an `ssh` übergeben. Er muss also ein Alias aus der
+  SSH-Config, ein auflösbarer Hostname oder eine IP sein. Im Beispiel oben verbindet sich
+  das Skript zu `db-1`, nicht zu `10.0.0.20`.
+- Steht ein Host in mehreren Gruppen, wird er mehrfach geprüft. Also jeden Host nur
+  einmal eintragen.
+- Unter `[gruppe:vars]` dürfen keine Variablen stehen, sonst gelten sie als Hosts.
+- YAML-Inventories werden nicht unterstützt.
+
+### SSH-Config
+
+Eine normale OpenSSH-Config, die per `ssh -F` übergeben wird. Für jeden Namen aus dem
+Inventory gibt es einen passenden `Host`-Block:
 
 ```
 Host host-a
@@ -105,15 +141,9 @@ Host host-b
   ProxyJump host-a
 ```
 
-Dann prüft ein Aufruf alle Hosts:
-
-```bash
-./check_updates.py
-./check_updates.py --host host-b      # nur einer (muss in virtualhosts stehen)
-```
-
-Fehlt das Inventory, endet das Skript mit Exit-Code 2 und nennt `--inventory` bzw.
-`--host`/`--user`.
+Mit `-F` liest `ssh` **nur** diese Datei, `~/.ssh/config` wird dann nicht ausgewertet.
+Der Login muss ohne Passwort-Abfrage klappen (Key, ggf. ssh-agent), da das Skript mit
+`BatchMode=yes` arbeitet. Testen: `ssh -F <config> host-a true`.
 
 ## Aufruf und Optionen
 
