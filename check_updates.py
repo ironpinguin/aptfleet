@@ -14,6 +14,7 @@ import remote
 from kev import recent_entries
 from parsing import HostReport, build_host_report
 from render import render_report
+from render_html import render_html_report
 from vulns import find_open_vulns
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -121,6 +122,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--kev-recent", nargs="?", const=7, type=_positive_days, default=None,
                         metavar="TAGE",
                         help="zuletzt auf CISA KEV aufgenommene CVEs anzeigen (Default ohne Wert: 7 Tage)")
+    parser.add_argument("--html", type=Path, metavar="PFAD",
+                        help="Report zusätzlich als HTML-Datei schreiben (eigenständig, druckbar)")
     return parser.parse_args(argv)
 
 
@@ -211,22 +214,26 @@ def main(
     if args.verbose:
         notices.extend(n for n in map(_foreign_notice, checkable) if n)
 
-    print(
-        render_report(
-            reports,
-            cves,
-            details=args.details,
-            security_only=args.security_only,
-            color=stdout.isatty(),
-            cve_lookup_failed=bool(failed),
-            verbose=args.verbose,
-            kev=kev_entries,
-            kev_recent=kev_recent,
-            kev_recent_days=args.kev_recent if args.kev_recent is not None else 7,
-            notices=notices,
-        ),
-        file=stdout,
+    options = dict(
+        details=args.details,
+        security_only=args.security_only,
+        cve_lookup_failed=bool(failed),
+        verbose=args.verbose,
+        kev=kev_entries,
+        kev_recent=kev_recent,
+        kev_recent_days=args.kev_recent if args.kev_recent is not None else 7,
+        notices=notices,
     )
+    print(render_report(reports, cves, color=stdout.isatty(), **options), file=stdout)
+
+    if args.html:
+        html = render_html_report(reports, cves, generated=datetime.datetime.now(), **options)
+        try:
+            args.html.write_text(html, encoding="utf-8")
+        except OSError as exc:
+            print(f"Fehler: HTML-Report nicht schreibbar ({exc})", file=sys.stderr)
+            return 2
+        print(f"HTML-Report geschrieben: {args.html}", file=stdout)
     return exit_code(reports, incomplete)
 
 

@@ -171,6 +171,7 @@ Der Login muss ohne Passwort-Abfrage klappen (Key, ggf. ssh-agent), da das Skrip
 | `--timeout SEKUNDEN` | Timeout pro Host (Default 120) |
 | `--verbose` | nicht parsebare Zeilen und Pakete ohne Ubuntu-Herkunft (PPAs, Fremd-Repos) anzeigen |
 | `--kev-recent [TAGE]` | in den letzten TAGE (Default 7) neu auf KEV aufgenommene CVEs auflisten |
+| `--html PFAD` | Report zusätzlich als HTML-Datei schreiben (siehe [HTML-Report](#html-report)) |
 
 Beispiele:
 
@@ -179,10 +180,59 @@ Beispiele:
 ./check_updates.py --host host-a --details
 ./check_updates.py --package openssh-server --package sudo
 ./check_updates.py --kev-recent 14
+./check_updates.py --details --html ~/reports/updates-$(date +%F).html
 ```
 
 Bis zu 6 Hosts werden parallel abgefragt. Die Ausgabe ist farbig, wenn sie in ein
 Terminal geht; bei Umleitung in eine Datei oder Pipe ist sie unformatiert.
+
+### Terminal-Ausgabe
+
+Bei mehreren Hosts steht oben eine Übersicht, darunter folgt pro Host ein Block mit den
+Updates und den offenen Lücken:
+
+```
+Host                Ubuntu  Updates  Security  KEV-Fix  Offene Lücken
+rootserver-ansible  24.04         5         3        2  1 (1 KEV)
+pdf-ansible         FEHLER: ssh timeout nach 120s
+
+━━ rootserver-ansible (Ubuntu 24.04) — 5 Updates, 3 Security, 1 offene Lücke ━━
+   Updates:
+      Paket       Version                                                        CVEs
+ SEC  libssl3t64  3.0.13-0ubuntu3.4 → 3.0.13-0ubuntu3.5                          CVE-2025-9231, CVE-2025-9232 (high, KEV)
+ SEC  openssl     3.0.13-0ubuntu3.4 → 3.0.13-0ubuntu3.5                          CVE-2025-9231, CVE-2025-9232 (high, KEV)
+ SEC  libxml2     2.9.14+dfsg-1.3ubuntu3.1 → 2.9.14+dfsg-1.3ubuntu3.1+esm1       (Changelog nicht verfügbar)
+      docker-ce   5:28.0.4-1~ubuntu.24.04~noble → 5:28.1.1-1~ubuntu.24.04~noble
+      tzdata      2025a-0ubuntu0.24.04 → 2025b-0ubuntu0.24.04.1
+   Offene Lücken ohne Fix:
+      Paket    installiert               CVE                   Status
+ KEV  libxml2  2.9.14+dfsg-1.3ubuntu3.1  CVE-2025-7000 (high)  kein Fix
+
+━━ pdf-ansible — FEHLER: ssh timeout nach 120s ━━
+
+Zusammenfassung: 2 Hosts, 5 Updates, 3 Security, 2 KEV-Fix verfügbar, 1 offene Lücke (1 KEV), 1 Host nicht erreichbar
+```
+
+`SEC` = Security-Update, `KEV` = Lücke auf der CISA-KEV-Liste. In der Übersicht heißt
+`KEV-Fix`: so viele Updates beheben eine KEV-Lücke. `nicht geprüft` heißt: Die Lücken-Prüfung
+war für den Host nicht möglich (Grund steht im Host-Block).
+
+### HTML-Report
+
+`--html PFAD` schreibt denselben Report zusätzlich als HTML-Datei. Die Terminal-Ausgabe
+bleibt unverändert. `--security-only`, `--details` und `--kev-recent` wirken auch auf die
+Datei.
+
+- Eine einzige Datei: CSS ist eingebettet, kein JavaScript, keine externen Ressourcen.
+  Sie kann also gemailt oder archiviert werden
+- Übersichtstabelle mit Links zu den Host-Abschnitten, Hosts mit Handlungsbedarf
+  (Security, KEV, Fehler) sind rot markiert
+- Mit `--details` stehen Changelog und CVE-Beschreibungen in aufklappbaren Blöcken.
+  Beim Drucken (bzw. „Als PDF speichern“ im Browser) sind sie automatisch aufgeklappt
+- Hell/Dunkel folgt der Systemeinstellung
+
+Kann die Datei nicht geschrieben werden, gibt es eine Fehlermeldung, und der Exit-Code
+ist 2. Die Terminal-Ausgabe erscheint trotzdem.
 
 ## Betrieb ohne sudo
 
@@ -267,4 +317,5 @@ python3 -m unittest discover -s tests -t .
 | `kev.py` | CISA-KEV-Katalog mit Cache |
 | `oval.py` | Ubuntu-OVAL-Feed laden und parsen |
 | `vulns.py` | offene Lücken aus installierten Paketen und OVAL ermitteln |
-| `render.py` | Textausgabe |
+| `render.py` | Textausgabe und gemeinsame Aufbereitung (Sortierung, Übersicht, Zusammenfassung) |
+| `render_html.py` | HTML-Report (`--html`) |
