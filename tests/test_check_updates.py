@@ -336,6 +336,31 @@ class MainTest(unittest.TestCase):
         _, out = self.run_main("--host", "webserver-ansible", "--verbose")
         self.assertIn("1 Pakete ohne Ubuntu-Herkunft nicht geprüft (docker-ce)", out)
 
+    def test_html_option_writes_file_and_keeps_terminal_output(self):
+        target = Path(self._tmp.name) / "report.html"
+        code, out = self.run_main("--host", "webserver-ansible", "--html", str(target), "--details")
+        self.assertEqual(code, 1)
+        self.assertIn("━━ webserver-ansible", out)
+        self.assertIn(f"HTML-Report geschrieben: {target}", out)
+        html = target.read_text(encoding="utf-8")
+        self.assertTrue(html.startswith("<!DOCTYPE html>"))
+        self.assertIn("webserver-ansible", html)
+        self.assertIn("<details", html)
+        self.assertIn("KEV", html)
+
+    def test_html_write_error_returns_2(self):
+        target = Path(self._tmp.name) / "fehlt" / "report.html"
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code, out = self.run_main("--host", "webserver-ansible", "--html", str(target))
+        self.assertEqual(code, 2)
+        self.assertIn("━━ webserver-ansible", out)
+        self.assertIn("Fehler: HTML-Report nicht schreibbar", err.getvalue())
+
+    def test_without_html_option_no_file_hint(self):
+        _, out = self.run_main("--host", "webserver-ansible")
+        self.assertNotIn("HTML-Report", out)
+
 
 class CliSmokeTest(unittest.TestCase):
     def test_help_runs_as_script(self):
