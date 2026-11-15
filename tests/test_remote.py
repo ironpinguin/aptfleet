@@ -8,7 +8,16 @@ import unittest
 from pathlib import Path
 
 from parsing import build_host_report, split_sections
-from remote import ORIGINS_SNIPPET, REMOTE_SCRIPT, HostResult, build_ssh_command, run_all, run_host
+from remote import (
+    ORIGINS_SNIPPET,
+    REMOTE_SCRIPT,
+    HostResult,
+    build_ssh_command,
+    phase_tracker,
+    run_all,
+    run_host,
+    stream_run,
+)
 
 STUBS = {
     "apt": """#!/bin/sh
@@ -380,3 +389,69 @@ class RunAllTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PhaseTrackerTest(unittest.TestCase):
+    def test_reports_sections_and_counts_changelogs(self):
+        phases = []
+        on_line = phase_tracker(phases.append)
+        for line in [
+            "===SECTION os===", "24.04", "noble",
+            "===SECTION apt_update===", "rc=0",
+            "===SECTION kernel===", "6.8.0",
+            "===SECTION sources===",
+            "libssl3t64 openssl 3.0.13", "openssl openssl 3.0.13", "tzdata tzdata 2025b",
+            "===SECTION changelog openssl===", "openssl (3.0.13) noble; urgency=medium",
+            "===SECTION changelog tzdata===",
+            "===END===",
+        ]:
+            on_line(line + "\n")
+        self.assertEqual(phases, [
+            "verbunden", "apt-get update", "Quellpakete zuordnen",
+            "Changelog 1/2: openssl", "Changelog 2/2: tzdata",
+        ])
+
+
+class StreamRunTest(unittest.TestCase):
+    def test_reports_lines_and_returns_output(self):
+        seen = []
+        proc = stream_run(["sh", "-c", "cat; echo err >&2; exit 3"], input="a\nb\n",
+                          timeout=10, on_line=seen.append)
+        self.assertEqual(seen, ["a\n", "b\n"])
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (3, "a\nb\n", "err\n"))
+
+    def test_timeout_keeps_partial_output(self):
+        with self.assertRaises(subprocess.TimeoutExpired) as ctx:
+            stream_run(["sh", "-c", "echo early; exec sleep 5"], input="", timeout=0.5,
+                       on_line=lambda line: None)
+        self.assertEqual(ctx.exception.output, "early\n")
+
+    def test_without_callback_behaves_like_subprocess_run(self):
+        proc = stream_run(["sh", "-c", "cat"], input="x\n", timeout=10)
+        self.assertEqual(proc.stdout, "x\n")
+
+
+class RunAllProgressTest(unittest.TestCase):
+    def test_reports_phases_and_completion_per_host(self):
+        events = []
+
+        class Recorder:
+            def host_phase(self, host, phase):
+                events.append(("phase", host, phase))
+
+            def host_done(self, host, error):
+                events.append(("done", host, error))
+
+        def runner(cmd, on_line=None, **kwargs):
+            for line in ["===SECTION os===\n", "===SECTION apt_update===\n", "===END===\n"]:
+                on_line(line)
+            return subprocess.CompletedProcess(cmd, 0, "===SECTION os===\n===END===\n", "")
+
+        results = run_all(["h1"], None, True, [], 30, runner=runner, progress=Recorder())
+        self.assertTrue(results[0].ok)
+        self.assertEqual(events, [
+            ("phase", "h1", "SSH-Verbindung"),
+            ("phase", "h1", "verbunden"),
+            ("phase", "h1", "apt-get update"),
+            ("done", "h1", None),
+        ])

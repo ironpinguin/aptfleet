@@ -13,6 +13,7 @@ import oval
 import remote
 from kev import recent_entries
 from parsing import HostReport, build_host_report
+from progress import Progress
 from render import render_report
 from render_html import render_html_report
 from vulns import find_open_vulns
@@ -124,6 +125,9 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
                         help="zuletzt auf CISA KEV aufgenommene CVEs anzeigen (Default ohne Wert: 7 Tage)")
     parser.add_argument("--html", type=Path, metavar="PFAD",
                         help="Report zusätzlich als HTML-Datei schreiben (eigenständig, druckbar)")
+    parser.add_argument("--no-progress", action="store_true",
+                        help="keine Fortschrittsanzeige auf stderr (ohne Terminal, z. B. cron, "
+                        "ist sie ohnehin aus)")
     return parser.parse_args(argv)
 
 
@@ -137,9 +141,21 @@ def main(
     oval_loader=oval.load_oval,
     today: datetime.date | None = None,
     stdout=None,
+    progress: Progress | None = None,
 ) -> int:
     stdout = stdout or sys.stdout
     args = parse_args(argv)
+    if progress is None:
+        progress = Progress(sys.stderr, enabled=False if args.no_progress else None)
+    try:
+        return _run(args, inventory, run_all, lookup, kev_loader, oval_loader, today, stdout,
+                    progress)
+    finally:
+        progress.close()
+
+
+def _run(args, inventory, run_all, lookup, kev_loader, oval_loader, today, stdout,
+         progress: Progress) -> int:
     if args.user:
         if not args.host:
             print("Fehler: --user benötigt mindestens ein --host", file=sys.stderr)
@@ -157,14 +173,17 @@ def main(
             return 2
         ssh_config = resolve_ssh_config(args.ssh_config)
 
+    progress.hosts_start(len(hosts))
     results = run_all(
-        hosts, ssh_config, not args.no_refresh, args.package, args.timeout, user=args.user
+        hosts, ssh_config, not args.no_refresh, args.package, args.timeout, user=args.user,
+        progress=progress if progress.enabled else None,
     )
     reports = [build_host_report(r.host, r.raw_output, r.error) for r in results]
 
     notices: list[str] = []
     incomplete = False
 
+    progress.step("KEV-Liste (CISA) laden")
     kev_data = kev_loader()
     if kev_data is None:
         notices.append("KEV-Liste nicht abrufbar (cisa.gov) – keine KEV-Markierung")
@@ -179,6 +198,7 @@ def main(
     checkable = [r for r in reports if not r.error and not r.vuln_check_problem]
     oval_by_codename: dict = {}
     for codename in dict.fromkeys(r.codename for r in checkable):
+        progress.step(f"Ubuntu-Schwachstellendaten ({codename}) laden")
         data = oval_loader(codename)
         oval_by_codename[codename] = data
         if data is None:
@@ -205,6 +225,8 @@ def main(
     cve_ids = {cve for report in reports for p in report.packages for cve in p.cves}
     if args.details:
         cve_ids |= {v.cve_id for report in reports for v in report.open_vulns}
+    if cve_ids:
+        progress.step(f"CVE-Infos abrufen ({len(cve_ids)} CVEs)")
     cves, failed = lookup(cve_ids) if cve_ids else ({}, [])
 
     kev_recent = None
@@ -224,6 +246,7 @@ def main(
         kev_recent_days=args.kev_recent if args.kev_recent is not None else 7,
         notices=notices,
     )
+    progress.close()
     print(render_report(reports, cves, color=stdout.isatty(), **options), file=stdout)
 
     if args.html:
