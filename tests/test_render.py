@@ -20,7 +20,10 @@ def webserver() -> HostReport:
 
 
 def package_lines(output: str) -> list[str]:
-    return [line for line in output.splitlines() if line.startswith(" SEC  ") or line.startswith("      ")]
+    return [
+        line for line in output.splitlines()
+        if (line.startswith(" SEC  ") or line.startswith("      ")) and not line.lstrip().startswith("Paket")
+    ]
 
 
 def single(package: str, pockets: list[str], cves: list[str], available=True, uncertain=False) -> HostReport:
@@ -68,7 +71,7 @@ class RenderReportTest(unittest.TestCase):
 
     def test_security_without_cve(self):
         out = render_report([single("foo", ["jammy-security"], [])], {})
-        self.assertIn(" SEC  foo  1.0-1 → 2.0-1  (keine CVE im Changelog)", out)
+        self.assertIn(" SEC  foo    1.0-1 → 2.0-1  (keine CVE im Changelog)", out)
 
     def test_uncertain_marker_and_unknown_priority(self):
         out = render_report([single("foo", ["jammy-security"], ["CVE-2025-1"], uncertain=True)], {})
@@ -154,11 +157,15 @@ class RenderReportTest(unittest.TestCase):
         lines = out.splitlines()
         self.assertIn("1 Updates, 0 Security, 2 offene Lücken", lines[0])
         i = lines.index("   Offene Lücken ohne Fix:")
-        self.assertTrue(lines[i + 1].startswith(" KEV  openssh-server"))
-        self.assertIn("CVE-2026-4711 (high)", lines[i + 1])
-        self.assertTrue(lines[i + 1].rstrip().endswith("kein Fix"))
-        self.assertTrue(lines[i + 2].startswith("      linux (Kernel)"))
-        self.assertEqual(lines[i + 1].index("1:9.6p1"), lines[i + 2].index("6.8.0-45.45"))
+        header = lines[i + 1]
+        self.assertEqual(header.split(), ["Paket", "installiert", "CVE", "Status"])
+        self.assertTrue(lines[i + 2].startswith(" KEV  openssh-server"))
+        self.assertIn("CVE-2026-4711 (high)", lines[i + 2])
+        self.assertTrue(lines[i + 2].rstrip().endswith("kein Fix"))
+        self.assertTrue(lines[i + 3].startswith("      linux (Kernel)"))
+        self.assertEqual(lines[i + 2].index("1:9.6p1"), lines[i + 3].index("6.8.0-45.45"))
+        self.assertEqual(header.index("installiert"), lines[i + 2].index("1:9.6p1"))
+        self.assertEqual(header.index("Status"), lines[i + 2].index("kein Fix"))
         self.assertIn("2 offene Lücken (1 KEV)", lines[-1])
 
     def test_open_vulns_details(self):
@@ -248,8 +255,8 @@ class RenderReportTest(unittest.TestCase):
         ])
         lines = render_report([r], {}).splitlines()
         i = lines.index("   Offene Lücken ohne Fix:")
-        self.assertIn("linux (Kernel)", lines[i + 1])
-        self.assertIn("liblua5.1-0", lines[i + 2])
+        self.assertIn("linux (Kernel)", lines[i + 2])
+        self.assertIn("liblua5.1-0", lines[i + 3])
 
     def test_header_without_anything(self):
         out = render_report([HostReport("git-ansible", os_version="22.04")], {})
@@ -293,6 +300,63 @@ class RenderReportTest(unittest.TestCase):
     def test_no_color_codes_without_tty(self):
         out = render_report([self._open_vuln_report()], {}, kev={"CVE-2026-4711": KEV_SSH}, kev_recent=[KEV_SSH])
         self.assertNotIn("\033[", out)
+
+    def test_updates_heading_and_column_header(self):
+        lines = render_report([webserver()], CVES).splitlines()
+        i = lines.index("   Updates:")
+        header = lines[i + 1]
+        self.assertEqual(header.split(), ["Paket", "Version", "CVEs"])
+        first = lines[i + 2]
+        self.assertTrue(first.startswith(" SEC  libssl3t64"))
+        self.assertEqual(header.index("Paket"), first.index("libssl3t64"))
+        self.assertEqual(header.index("Version"), first.index("3.0.13-0ubuntu3.4"))
+        self.assertEqual(header.index("CVEs"), first.index("CVE-2025-9231"))
+
+    def test_no_updates_heading_without_packages(self):
+        out = render_report([HostReport("git-ansible", os_version="22.04")], {})
+        self.assertNotIn("Updates:", out)
+        self.assertNotIn("Paket", out)
+
+    def test_no_updates_heading_when_security_only_filters_all(self):
+        out = render_report([single("tzdata", ["jammy-updates"], [])], {}, security_only=True)
+        self.assertNotIn("   Updates:", out)
+
+    def test_column_header_dimmed_with_color(self):
+        out = render_report([webserver()], CVES, color=True)
+        header = next(l for l in out.splitlines() if "Paket" in l)
+        self.assertIn("\033[2m", header)
+
+    def test_single_host_has_no_overview(self):
+        out = render_report([webserver()], CVES)
+        self.assertTrue(out.startswith("━━ webserver-ansible"))
+
+    def test_overview_for_multiple_hosts(self):
+        problem = HostReport("git-ansible", os_version="22.04", vuln_check_problem="keine Paketliste")
+        vulns = self._open_vuln_report()
+        vulns.host = "kvm-ansible"
+        reports = [webserver(), HostReport(host="pdf-ansible", error="ssh timeout nach 120s"), problem, vulns]
+        lines = render_report(reports, CVES, kev={"CVE-2025-9232": KEV_ENTRY}).splitlines()
+        self.assertEqual(lines[0].split(), ["Host", "Ubuntu", "Updates", "Security", "KEV-Fix", "Offene", "Lücken"])
+        self.assertEqual(lines[1].split(), ["webserver-ansible", "24.04", "5", "3", "2", "–"])
+        self.assertEqual(lines[2].split("  ", 1)[0], "pdf-ansible")
+        self.assertTrue(lines[2].endswith("FEHLER: ssh timeout nach 120s"))
+        self.assertEqual(lines[3].split(), ["git-ansible", "22.04", "0", "0", "0", "nicht", "geprüft"])
+        self.assertEqual(lines[4].split(), ["kvm-ansible", "22.04", "1", "0", "0", "2", "(1", "KEV)"])
+        self.assertEqual(lines[5], "")
+        self.assertTrue(lines[6].startswith("━━ webserver-ansible"))
+        # Zahlen rechtsbündig unter ihrem Spaltenkopf
+        self.assertEqual(lines[0].index("Updates") + len("Updates"), lines[1].index(" 5 ") + 2)
+        self.assertEqual(lines[0].index("Offene"), lines[1].index("–"))
+
+    def test_overview_bold_header_with_color(self):
+        out = render_report([webserver(), HostReport(host="b", error="x")], CVES, color=True)
+        self.assertTrue(out.startswith("\033[1mHost"))
+
+    def test_blank_line_between_hosts(self):
+        reports = [HostReport("a", os_version="24.04"), HostReport("b", os_version="24.04")]
+        lines = render_report(reports, {}).splitlines()
+        i = next(n for n, l in enumerate(lines) if l.startswith("━━ b"))
+        self.assertEqual(lines[i - 1], "")
 
 
 if __name__ == "__main__":

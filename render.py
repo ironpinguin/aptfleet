@@ -1,5 +1,8 @@
-"""Aufbereitung der Host-Reports als Terminal-Text."""
+"""Aufbereitung der Host-Reports als Terminal-Text; die öffentlichen Helfer nutzt auch render_html."""
 from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import NamedTuple
 
 from cve_info import CveInfo, priority_rank
 from kev import KevEntry
@@ -9,6 +12,7 @@ from vulns import kev_fix_count
 BOLD = "\033[1m"
 RED = "\033[31m"
 YELLOW = "\033[33m"
+DIM = "\033[2m"
 RESET = "\033[0m"
 PRIORITY_COLORS = {"critical": RED + BOLD, "high": RED, "medium": YELLOW}
 DETAIL_INDENT = " " * 8
@@ -33,24 +37,45 @@ def _sort_key(pkg: PackageReport, cves: dict[str, CveInfo], kev: dict[str, KevEn
     return (1, 1, 0, pkg.upgrade.package)
 
 
-def _cve_text(pkg: PackageReport, cves: dict[str, CveInfo], kev: dict[str, KevEntry], color: bool) -> str:
+def sorted_packages(
+    report: HostReport, cves: dict[str, CveInfo], kev: dict[str, KevEntry], security_only: bool
+) -> list[PackageReport]:
+    """Pakete in Anzeigereihenfolge: Security (KEV, dann Priorität) vor dem Rest."""
+    packages = sorted(report.packages, key=lambda p: _sort_key(p, cves, kev))
+    if security_only:
+        packages = [p for p in packages if p.upgrade.is_security]
+    return packages
+
+
+def package_note(pkg: PackageReport) -> str:
+    """Hinweis anstelle der CVE-Liste, wenn das Paket keine CVEs nennt."""
     if pkg.cves:
-        parts = []
-        for cve_id in pkg.cves:
-            prio = _priority(cve_id, cves)
-            marks = []
-            if prio:
-                marks.append(_c(prio, PRIORITY_COLORS.get(prio, ""), color))
-            if cve_id in kev:
-                marks.append(_c("KEV", RED + BOLD, color))
-            parts.append(f"{cve_id} ({', '.join(marks)})" if marks else cve_id)
-        text = ", ".join(parts)
-    elif not pkg.changelog_available:
-        text = "(Changelog nicht verfügbar)" if pkg.upgrade.is_security else ""
-    elif pkg.upgrade.is_security:
-        text = "(keine CVE im Changelog)"
-    else:
-        text = ""
+        return ""
+    if not pkg.changelog_available:
+        return "(Changelog nicht verfügbar)" if pkg.upgrade.is_security else ""
+    return "(keine CVE im Changelog)" if pkg.upgrade.is_security else ""
+
+
+def changelog_lines(entry) -> list[str]:
+    """Inhaltszeilen eines Changelog-Eintrags ohne Leerzeilen und Trailer ('-- Name')."""
+    return [
+        stripped
+        for stripped in (line.strip() for line in entry.text.splitlines())
+        if stripped and not stripped.startswith("-- ")
+    ]
+
+
+def _cve_text(pkg: PackageReport, cves: dict[str, CveInfo], kev: dict[str, KevEntry], color: bool) -> str:
+    parts = []
+    for cve_id in pkg.cves:
+        prio = _priority(cve_id, cves)
+        marks = []
+        if prio:
+            marks.append(_c(prio, PRIORITY_COLORS.get(prio, ""), color))
+        if cve_id in kev:
+            marks.append(_c("KEV", RED + BOLD, color))
+        parts.append(f"{cve_id} ({', '.join(marks)})" if marks else cve_id)
+    text = ", ".join(parts) or package_note(pkg)
     if pkg.changelog_uncertain:
         text = f"{text} [Abgleich unsicher]".strip()
     return text
@@ -75,10 +100,7 @@ def _details(pkg: PackageReport, cves: dict[str, CveInfo], kev: dict[str, KevEnt
         lines.append(f"{DETAIL_INDENT}(installierte Version nicht im Changelog gefunden – Auszug evtl. unvollständig)")
     for entry in pkg.entries:
         lines.append(f"{DETAIL_INDENT}{entry.version}:")
-        for line in entry.text.splitlines():
-            stripped = line.strip()
-            if stripped and not stripped.startswith("-- "):
-                lines.append(f"{DETAIL_INDENT}  {stripped}")
+        lines.extend(f"{DETAIL_INDENT}  {line}" for line in changelog_lines(entry))
     for cve_id in pkg.cves:
         lines.extend(_cve_detail_lines(cve_id, cves, kev))
     return lines
@@ -94,8 +116,18 @@ def _priority_summary(group: list[OpenVuln]) -> str:
     return f"{len(group)} CVEs ({', '.join(f'{counts[p]} {p}' for p in order)})"
 
 
-def _open_vuln_rows(vulns: list[OpenVuln], details: bool) -> list[tuple[OpenVuln, str, str, str, str, bool]]:
-    """Wandelt die sortierte Lückenliste in Anzeigezeilen (v, Name, Version, CVE-Text, Status, Sammelzeile)."""
+class VulnRow(NamedTuple):
+    vuln: OpenVuln  # bei Sammelzeilen das erste Gruppenmitglied
+    name: str
+    version: str
+    cve_text: str
+    status: str
+    summarized: bool
+
+
+def open_vuln_rows(vulns: list[OpenVuln], details: bool) -> list[VulnRow]:
+    """Wandelt die sortierte Lückenliste in Anzeigezeilen; ohne details werden
+    mehrere Kernel-Lücken gleicher Version und gleichen Status zusammengefasst."""
     groups: dict[tuple[str, str, str], list[OpenVuln]] = {}
     if not details:
         for v in vulns:
@@ -109,12 +141,12 @@ def _open_vuln_rows(vulns: list[OpenVuln], details: bool) -> list[tuple[OpenVuln
         if group and len(group) >= 2:
             if key not in emitted:
                 emitted.add(key)
-                rows.append((v, f"{v.source} (Kernel)", v.installed_version, _priority_summary(group),
-                             f"{v.status} – Liste mit --details", True))
+                rows.append(VulnRow(v, f"{v.source} (Kernel)", v.installed_version, _priority_summary(group),
+                                    f"{v.status} – Liste mit --details", True))
             continue
         name = f"{v.source} (Kernel)" if v.is_kernel else v.binaries[0]
         cve_text = f"{v.cve_id} ({v.priority})" if v.priority else v.cve_id
-        rows.append((v, name, v.installed_version, cve_text, v.status, False))
+        rows.append(VulnRow(v, name, v.installed_version, cve_text, v.status, False))
     return rows
 
 
@@ -122,11 +154,11 @@ def _open_vuln_lines(
     report: HostReport, cves: dict[str, CveInfo], details: bool, kev: dict[str, KevEntry], color: bool
 ) -> list[str]:
     # report.open_vulns kommt bereits sortiert aus vulns.find_open_vulns
-    rows = _open_vuln_rows(report.open_vulns, details)
-    name_width = max(len(r[1]) for r in rows)
-    version_width = max(len(r[2]) for r in rows)
-    cve_width = max(len(r[3]) for r in rows)
-    lines = ["   Offene Lücken ohne Fix:"]
+    rows = open_vuln_rows(report.open_vulns, details)
+    name_width = max(len(VULN_HEADER[0]), *(len(r.name) for r in rows))
+    version_width = max(len(VULN_HEADER[1]), *(len(r.version) for r in rows))
+    cve_width = max(len(VULN_HEADER[2]), *(len(r.cve_text) for r in rows))
+    lines = ["   Offene Lücken ohne Fix:", _column_header(VULN_HEADER, (name_width, version_width, cve_width), color)]
     for v, name, version, cve_text, status, summarized in rows:
         tag = _c(" KEV", RED + BOLD, color) if v.kev else "    "
         line = f"{tag}  {name:<{name_width}}  {version:<{version_width}}  {cve_text:<{cve_width}}  {status}"
@@ -147,27 +179,20 @@ def _render_host(
     if report.error:
         return [_c(f"━━ {report.host} — FEHLER: {report.error} ━━", RED + BOLD, color)]
 
-    total = len(report.packages)
-    security = sum(1 for p in report.packages if p.upgrade.is_security)
     os_part = f" (Ubuntu {report.os_version})" if report.os_version else ""
-    summary = f"{total} Updates, {security} Security" if total else "keine Updates"
-    open_count = len(report.open_vulns)
-    if open_count:
-        summary += f", {_open_text(open_count)}"
-    elif not report.vuln_check_problem:
-        summary += ", keine offenen Lücken" if not total else ""
-    lines = [_c(f"━━ {report.host}{os_part} — {summary} ━━", BOLD, color)]
+    lines = [_c(f"━━ {report.host}{os_part} — {host_summary(report)} ━━", BOLD, color)]
     lines.extend(f"  ⚠ {warning}" for warning in report.warnings)
     if report.vuln_check_problem:
         lines.append(f"  ⚠ Lücken-Prüfung nicht möglich: {report.vuln_check_problem}")
 
-    packages = sorted(report.packages, key=lambda p: _sort_key(p, cves, kev))
-    if security_only:
-        packages = [p for p in packages if p.upgrade.is_security]
+    packages = sorted_packages(report, cves, kev, security_only)
     versions = {id(p): f"{p.upgrade.old_version} → {p.upgrade.new_version}" for p in packages}
-    name_width = max((len(p.upgrade.package) for p in packages), default=0)
-    version_width = max((len(v) for v in versions.values()), default=0)
+    name_width = max(len(UPDATE_HEADER[0]), *(len(p.upgrade.package) for p in packages), 0)
+    version_width = max(len(UPDATE_HEADER[1]), *(len(v) for v in versions.values()), 0)
 
+    if packages:
+        lines.append("   Updates:")
+        lines.append(_column_header(UPDATE_HEADER, (name_width, version_width), color))
     for pkg in packages:
         tag = _c(" SEC", RED + BOLD, color) if pkg.upgrade.is_security else "    "
         line = (
@@ -182,11 +207,86 @@ def _render_host(
     return lines
 
 
+UPDATE_HEADER = ("Paket", "Version", "CVEs")
+VULN_HEADER = ("Paket", "installiert", "CVE", "Status")
+
+
+def _column_header(titles: tuple[str, ...], widths: tuple[int, ...], color: bool) -> str:
+    """Spaltenkopf passend zu den Datenzeilen (5 Zeichen Tag + 2 Leerzeichen davor)."""
+    cells = [f"{t:<{w}}" for t, w in zip(titles, widths)] + list(titles[len(widths):])
+    return _c("      " + "  ".join(cells).rstrip(), DIM, color)
+
+
+def host_summary(report: HostReport) -> str:
+    """Kurzfassung eines erreichbaren Hosts, z. B. '5 Updates, 3 Security, 2 offene Lücken'."""
+    total = len(report.packages)
+    security = sum(1 for p in report.packages if p.upgrade.is_security)
+    summary = f"{total} Updates, {security} Security" if total else "keine Updates"
+    open_count = len(report.open_vulns)
+    if open_count:
+        summary += f", {_open_text(open_count)}"
+    elif not report.vuln_check_problem and not total:
+        summary += ", keine offenen Lücken"
+    return summary
+
+
+@dataclass
+class OverviewRow:
+    host: str
+    os_version: str
+    error: str | None
+    updates: int
+    security: int
+    kev_fixes: int
+    open_vulns: str  # "–", "nicht geprüft" oder "2 (1 KEV)"
+    attention: bool  # Security-Update, KEV oder Problem auf dem Host
+
+
+def overview_rows(reports: list[HostReport], kev: dict[str, KevEntry]) -> list[OverviewRow]:
+    rows = []
+    kev_ids = set(kev)
+    for r in reports:
+        security = sum(1 for p in r.packages if p.upgrade.is_security)
+        open_kev = sum(1 for v in r.open_vulns if v.kev)
+        if r.error:
+            open_text = ""
+        elif r.vuln_check_problem:
+            open_text = "nicht geprüft"
+        elif r.open_vulns:
+            open_text = f"{len(r.open_vulns)} ({open_kev} KEV)"
+        else:
+            open_text = "–"
+        kev_fixes = kev_fix_count(r, kev_ids)
+        attention = bool(r.error or r.vuln_check_problem or security or kev_fixes or open_kev)
+        rows.append(OverviewRow(r.host, r.os_version or "", r.error, len(r.packages), security,
+                                kev_fixes, open_text, attention))
+    return rows
+
+
+OVERVIEW_HEADER = ("Host", "Ubuntu", "Updates", "Security", "KEV-Fix", "Offene Lücken")
+
+
+def _overview_lines(reports: list[HostReport], kev: dict[str, KevEntry], color: bool) -> list[str]:
+    rows = overview_rows(reports, kev)
+    host_w = max(len(OVERVIEW_HEADER[0]), *(len(r.host) for r in rows))
+    os_w = max(len(OVERVIEW_HEADER[1]), *(len(r.os_version) for r in rows))
+    num_w = [len(t) for t in OVERVIEW_HEADER[2:5]]
+    lines = [_c("  ".join([f"{OVERVIEW_HEADER[0]:<{host_w}}", f"{OVERVIEW_HEADER[1]:<{os_w}}",
+                           *OVERVIEW_HEADER[2:]]), BOLD, color)]
+    for r in rows:
+        if r.error:
+            lines.append(f"{r.host:<{host_w}}  " + _c(f"FEHLER: {r.error}", RED + BOLD, color))
+            continue
+        nums = [f"{n:>{w}}" for n, w in zip((r.updates, r.security, r.kev_fixes), num_w)]
+        lines.append("  ".join([f"{r.host:<{host_w}}", f"{r.os_version:<{os_w}}", *nums, r.open_vulns]))
+    return lines
+
+
 def _open_text(count: int) -> str:
     return "1 offene Lücke" if count == 1 else f"{count} offene Lücken"
 
 
-def _summary(reports: list[HostReport], kev: dict[str, KevEntry]) -> str:
+def summary_text(reports: list[HostReport], kev: dict[str, KevEntry]) -> str:
     updates = sum(len(r.packages) for r in reports)
     security = sum(1 for r in reports for p in r.packages if p.upgrade.is_security)
     failed = sum(1 for r in reports if r.error)
@@ -203,6 +303,14 @@ def _summary(reports: list[HostReport], kev: dict[str, KevEntry]) -> str:
     return text
 
 
+def kev_affected_hosts(reports: list[HostReport], cve_id: str) -> list[str]:
+    return [
+        r.host
+        for r in reports
+        if any(cve_id in p.cves for p in r.packages) or any(v.cve_id == cve_id for v in r.open_vulns)
+    ]
+
+
 def _kev_recent_lines(reports: list[HostReport], entries: list[KevEntry], days: int) -> list[str]:
     period = "letzter Tag" if days == 1 else f"letzte {days} Tage"
     lines = [f"Neu auf CISA KEV ({period}):"]
@@ -212,12 +320,7 @@ def _kev_recent_lines(reports: list[HostReport], entries: list[KevEntry], days: 
     for entry in sorted(entries, key=lambda e: e.date_added, reverse=True):
         name = entry.name if len(entry.name) <= 60 else entry.name[:59] + "…"
         line = f" {entry.date_added}  {entry.cve_id}  {entry.vendor} {entry.product}: {name}"
-        hosts = [
-            r.host
-            for r in reports
-            if any(entry.cve_id in p.cves for p in r.packages)
-            or any(v.cve_id == entry.cve_id for v in r.open_vulns)
-        ]
+        hosts = kev_affected_hosts(reports, entry.cve_id)
         if hosts:
             line += f"  betrifft: {', '.join(hosts)}"
         lines.append(line)
@@ -240,7 +343,12 @@ def render_report(
 ) -> str:
     kev = kev or {}
     lines: list[str] = []
-    for report in reports:
+    if len(reports) > 1:
+        lines.extend(_overview_lines(reports, kev, color))
+        lines.append("")
+    for i, report in enumerate(reports):
+        if i:
+            lines.append("")
         lines.extend(_render_host(report, cves, details, security_only, color, kev))
         if verbose:
             lines.extend(f"  ? nicht geparst: {line}" for line in report.unparsed)
@@ -251,5 +359,5 @@ def render_report(
     if cve_lookup_failed:
         lines.append("Hinweis: CVE-Prioritäten teilweise nicht abrufbar (Ubuntu-Security-API nicht erreichbar).")
     lines.extend(f"Hinweis: {notice}" for notice in notices or [])
-    lines.append(_summary(reports, kev))
+    lines.append(summary_text(reports, kev))
     return "\n".join(lines)
