@@ -53,7 +53,10 @@ echo "===SECTION os==="
 
 echo "===SECTION apt_update==="
 if [ "$REFRESH" = "1" ]; then
-  out=$(timeout 90 sudo -n apt-get update -qq </dev/null 2>&1)
+  # Als root (z. B. lokaler Cronjob) ohne sudo, sonst sudo ohne Passwort.
+  sudo=""
+  [ "$(id -u)" = "0" ] || sudo="sudo -n"
+  out=$(timeout 90 $sudo apt-get update -qq </dev/null 2>&1)
   rc=$?
   echo "rc=$rc"
   [ -n "$out" ] && printf '%s\n' "$out"
@@ -241,6 +244,11 @@ def build_ssh_command(
     return [*cmd, host, remote_cmd]
 
 
+def build_local_command(refresh: bool, packages: list[str]) -> list[str]:
+    """Führt das Remote-Skript auf dem eigenen Rechner aus (--local, ohne SSH)."""
+    return ["bash", "-s", "--", "1" if refresh else "0", *packages]
+
+
 def run_host(
     host: str,
     ssh_config: Path | str | None,
@@ -250,12 +258,18 @@ def run_host(
     runner=stream_run,
     user: str | None = None,
     on_phase=None,
+    local: bool = False,
 ) -> HostResult:
-    """on_phase(text) meldet, was auf dem Host gerade läuft (nur für die Fortschrittsanzeige)."""
-    cmd = build_ssh_command(host, ssh_config, refresh, packages, user)
+    """on_phase(text) meldet, was auf dem Host gerade läuft (nur für die Fortschrittsanzeige).
+    local: Skript lokal per bash statt per SSH ausführen; host ist dann nur der Anzeigename."""
+    if local:
+        cmd = build_local_command(refresh, packages)
+    else:
+        cmd = build_ssh_command(host, ssh_config, refresh, packages, user)
+    tool = "bash" if local else "ssh"
     extra = {"on_line": phase_tracker(on_phase)} if on_phase else {}
     if on_phase:
-        on_phase("SSH-Verbindung")
+        on_phase("lokal starten" if local else "SSH-Verbindung")
     try:
         proc = runner(
             cmd,
@@ -274,9 +288,9 @@ def run_host(
         if SOURCES_MARKER in partial:
             note = f"\n===SECTION timeout===\nTimeout nach {timeout}s – Changelogs unvollständig\n"
             return HostResult(host, True, None, partial + note)
-        return HostResult(host, False, f"ssh timeout nach {timeout}s", "")
+        return HostResult(host, False, f"{tool} timeout nach {timeout}s", "")
     except OSError as exc:
-        return HostResult(host, False, f"ssh nicht ausführbar: {exc}", "")
+        return HostResult(host, False, f"{tool} nicht ausführbar: {exc}", "")
 
     if proc.returncode == 0 and END_MARKER in proc.stdout:
         return HostResult(host, True, None, proc.stdout)
@@ -297,14 +311,17 @@ def run_all(
     runner=stream_run,
     user: str | None = None,
     progress=None,
+    local: bool = False,
 ) -> list[HostResult]:
-    """progress: Objekt mit host_phase(host, text) und host_done(host, error), z. B. progress.Progress."""
+    """progress: Objekt mit host_phase(host, text) und host_done(host, error), z. B. progress.Progress.
+    local: siehe run_host."""
 
     def check(host: str) -> HostResult:
         if progress is None:
-            return run_host(host, ssh_config, refresh, packages, timeout, runner, user)
+            return run_host(host, ssh_config, refresh, packages, timeout, runner, user,
+                            local=local)
         result = run_host(host, ssh_config, refresh, packages, timeout, runner, user,
-                          on_phase=lambda phase: progress.host_phase(host, phase))
+                          on_phase=lambda phase: progress.host_phase(host, phase), local=local)
         progress.host_done(host, result.error)
         return result
 
