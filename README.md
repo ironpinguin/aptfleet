@@ -172,6 +172,7 @@ Der Login muss ohne Passwort-Abfrage klappen (Key, ggf. ssh-agent), da das Skrip
 | `--verbose` | nicht parsebare Zeilen und Pakete ohne Ubuntu-Herkunft (PPAs, Fremd-Repos) anzeigen |
 | `--kev-recent [TAGE]` | in den letzten TAGE (Default 7) neu auf KEV aufgenommene CVEs auflisten |
 | `--html PFAD` | Report zusätzlich als HTML-Datei schreiben (siehe [HTML-Report](#html-report)) |
+| `--no-progress` | keine Fortschrittsanzeige auf stderr (siehe unten) |
 
 Beispiele:
 
@@ -185,6 +186,22 @@ Beispiele:
 
 Bis zu 6 Hosts werden parallel abgefragt. Die Ausgabe ist farbig, wenn sie in ein
 Terminal geht; bei Umleitung in eine Datei oder Pipe ist sie unformatiert.
+
+**Fortschritt:** Läuft das Skript im Terminal, zeigt es auf stderr, was gerade passiert.
+Eine Statuszeile nennt für jeden laufenden Host den aktuellen Schritt (`SSH-Verbindung`,
+`apt-get update`, `Changelog 3/12: openssl`, …). Fertige Hosts und die folgenden Schritte
+(KEV-Liste, Ubuntu-Schwachstellendaten, CVE-Infos) erscheinen als eigene Zeilen:
+
+```text
+» 3 Host(s) prüfen …
+  ✓ [1/3] webserver-ansible fertig (14s)
+  ✗ [2/3] pdf-ansible: ssh timeout nach 120s (120s)
+  [2/3] rootserver-ansible: Changelog 4/9: linux-meta
+```
+
+Ist stderr kein Terminal (cron, `2>datei`), gibt es keine Fortschrittsanzeige. Mit
+`--no-progress` lässt sie sich auch im Terminal abschalten. Der Report auf stdout ist in
+beiden Fällen gleich.
 
 ### Terminal-Ausgabe
 
@@ -311,6 +328,7 @@ python3 -m unittest discover -s tests -t .
 |---|---|
 | `check_updates.py` | CLI, Inventory, Ablaufsteuerung, Exit-Code |
 | `remote.py` | SSH-Aufruf und Remote-Skript (Abschnitte `===SECTION …===`) |
+| `progress.py` | Fortschrittsanzeige auf stderr (nur im Terminal) |
 | `parsing.py` | Remote-Ausgabe in `HostReport`s zerlegen |
 | `debversion.py` | Vergleich von Debian-Versionsnummern |
 | `cve_info.py` | Ubuntu-CVE-API mit Cache |

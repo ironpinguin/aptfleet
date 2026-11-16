@@ -21,6 +21,7 @@ from cve_info import CveInfo
 from kev import KevData, KevEntry
 from oval import OvalCve, OvalData
 from parsing import HostReport, OpenVuln, PackageReport, Upgrade
+from progress import Progress
 from remote import HostResult
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -124,11 +125,14 @@ class MainTest(unittest.TestCase):
         self.lookup_calls = []
         self.users = []
         self.oval_calls = []
+        self.progress_args = []
 
     def tearDown(self):
         self._tmp.cleanup()
 
-    def fake_run_all(self, hosts, ssh_config, refresh, packages, timeout, user=None):
+    def fake_run_all(self, hosts, ssh_config, refresh, packages, timeout, user=None,
+                     progress=None):
+        self.progress_args.append(progress)
         self.run_calls.append((hosts, ssh_config, refresh, packages, timeout))
         self.users.append(user)
         raw = (FIXTURES / "remote_output.txt").read_text()
@@ -141,7 +145,7 @@ class MainTest(unittest.TestCase):
         self.lookup_calls.append(set(cve_ids))
         return {"CVE-2025-9232": CveInfo("CVE-2025-9232", "high", "x")}, ["CVE-2025-9231"]
 
-    def run_main(self, *argv, kev=_UNSET, oval=_UNSET):
+    def run_main(self, *argv, kev=_UNSET, oval=_UNSET, progress=None):
         kev_data = default_kev() if kev is _UNSET else kev
         oval_data = default_oval() if oval is _UNSET else oval
 
@@ -159,6 +163,7 @@ class MainTest(unittest.TestCase):
             oval_loader=oval_loader,
             today=TODAY,
             stdout=out,
+            progress=progress,
         )
         return code, out.getvalue()
 
@@ -256,6 +261,30 @@ class MainTest(unittest.TestCase):
         # Host-Ausgabe ohne `installed`/Codename: Lücken-Prüfung unmöglich => unvollständig (3).
         self.assertEqual(code, 3)
         self.assertEqual(self.lookup_calls, [])
+
+    def test_progress_disabled_without_terminal(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.run_main()
+        self.assertEqual(self.progress_args, [None])
+        self.assertEqual(err.getvalue(), "")
+
+    def test_progress_reports_steps_on_stderr_not_stdout(self):
+        err = io.StringIO()
+        progress = Progress(err, enabled=True)
+        code, out = self.run_main("--details", progress=progress)
+        self.assertEqual(code, 2)
+        self.assertIs(self.progress_args[0], progress)
+        log = err.getvalue()
+        self.assertIn("» 3 Host(s) prüfen", log)
+        self.assertIn("» KEV-Liste (CISA) laden", log)
+        self.assertIn("» Ubuntu-Schwachstellendaten (noble) laden", log)
+        self.assertIn("» CVE-Infos abrufen (", log)
+        self.assertNotIn("»", out)
+
+    def test_no_progress_flag_disables_progress(self):
+        self.run_main("--no-progress")
+        self.assertEqual(self.progress_args, [None])
 
     def test_full_run_marks_kev_and_lists_open_vulns(self):
         code, out = self.run_main("--host", "webserver-ansible")
