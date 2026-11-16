@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from check_updates import (
     SSH_CONFIG,
@@ -126,13 +127,15 @@ class MainTest(unittest.TestCase):
         self.users = []
         self.oval_calls = []
         self.progress_args = []
+        self.locals = []
 
     def tearDown(self):
         self._tmp.cleanup()
 
     def fake_run_all(self, hosts, ssh_config, refresh, packages, timeout, user=None,
-                     progress=None):
+                     progress=None, local=False):
         self.progress_args.append(progress)
+        self.locals.append(local)
         self.run_calls.append((hosts, ssh_config, refresh, packages, timeout))
         self.users.append(user)
         raw = (FIXTURES / "remote_output.txt").read_text()
@@ -189,6 +192,30 @@ class MainTest(unittest.TestCase):
         self.assertEqual(code, 1)
         hosts, _, refresh, packages, timeout = self.run_calls[0]
         self.assertEqual((hosts, refresh, packages, timeout), (["webserver-ansible"], False, ["openssl"], 30))
+
+    def test_local_checks_own_host_without_inventory(self):
+        self.inventory = Path(self._tmp.name) / "gibtsnicht"
+        with mock.patch("check_updates.socket.gethostname", return_value="myserver"):
+            code, out = self.run_main("--local", "--no-refresh")
+        self.assertEqual(code, 1)
+        hosts, ssh_config, refresh, _, _ = self.run_calls[0]
+        self.assertEqual((hosts, ssh_config, refresh), (["myserver"], None, False))
+        self.assertEqual(self.locals, [True])
+        self.assertEqual(self.users, [None])
+        self.assertIn("myserver", out)
+
+    def test_local_rejects_host_options(self):
+        for extra in (["--host", "x"], ["--user", "u", "--host", "x"],
+                      ["--inventory", "inv"], ["--ssh-config", "cfg"]):
+            with self.subTest(extra=extra), mock.patch("sys.stderr", io.StringIO()) as err:
+                code, _ = self.run_main("--local", *extra)
+                self.assertEqual(code, 2)
+                self.assertIn("--local ist nicht kombinierbar", err.getvalue())
+        self.assertEqual(self.run_calls, [])
+
+    def test_ssh_modes_are_not_local(self):
+        self.run_main()
+        self.assertEqual(self.locals, [False])
 
     def test_unknown_host_returns_2_without_ssh(self):
         code, _ = self.run_main("--host", "gibtsnicht")

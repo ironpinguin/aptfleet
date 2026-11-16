@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import socket
 import sys
 from pathlib import Path
 
@@ -112,6 +113,9 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--ssh-config", type=Path, metavar="PFAD",
                         help=f"SSH-Config für ssh -F (Default {SSH_CONFIG}, falls vorhanden, "
                         "sonst ~/.ssh/config; mit --user nur bei Angabe)")
+    parser.add_argument("--local", action="store_true",
+                        help="nur den eigenen Rechner prüfen, ohne SSH (z. B. per Cronjob auf "
+                        "dem Server); nicht kombinierbar mit --host/--user/--inventory/--ssh-config")
     parser.add_argument("--security-only", action="store_true", help="nur Security-Updates anzeigen")
     parser.add_argument("--details", action="store_true", help="neue Changelog-Einträge anzeigen")
     parser.add_argument("--package", action="append", default=[], metavar="NAME",
@@ -156,7 +160,16 @@ def main(
 
 def _run(args, inventory, run_all, lookup, kev_loader, oval_loader, today, stdout,
          progress: Progress) -> int:
-    if args.user:
+    if args.local:
+        conflicts = [opt for opt, value in (("--host", args.host), ("--user", args.user),
+                                            ("--inventory", args.inventory),
+                                            ("--ssh-config", args.ssh_config)) if value]
+        if conflicts:
+            print(f"Fehler: --local ist nicht kombinierbar mit {', '.join(conflicts)}",
+                  file=sys.stderr)
+            return 2
+        hosts, ssh_config = [socket.gethostname()], None
+    elif args.user:
         if not args.host:
             print("Fehler: --user benötigt mindestens ein --host", file=sys.stderr)
             return 2
@@ -176,7 +189,7 @@ def _run(args, inventory, run_all, lookup, kev_loader, oval_loader, today, stdou
     progress.hosts_start(len(hosts))
     results = run_all(
         hosts, ssh_config, not args.no_refresh, args.package, args.timeout, user=args.user,
-        progress=progress if progress.enabled else None,
+        progress=progress if progress.enabled else None, local=args.local,
     )
     reports = [build_host_report(r.host, r.raw_output, r.error) for r in results]
 

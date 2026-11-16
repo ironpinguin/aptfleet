@@ -16,6 +16,9 @@ Security-Infos dazu:
 Auf den Hosts wird nur gelesen. Pro Host gibt es eine SSH-Session. Das Remote-Skript
 kommt per stdin, auf dem Host wird nichts abgelegt.
 
+Alternativ läuft das Skript mit `--local` direkt auf dem Server, ohne SSH, z. B. als
+Cronjob mit Mailversand des HTML-Reports (siehe [Lokal per Cronjob](#lokal-per-cronjob)).
+
 ## Voraussetzungen
 
 **Lokal** (wo das Skript läuft):
@@ -43,7 +46,8 @@ cp -r updates_report ~/tools/
 
 ## Hosts festlegen
 
-Es gibt drei Wege.
+Es gibt drei Wege per SSH. Für den eigenen Rechner ohne SSH gibt es `--local` (siehe
+[Lokal per Cronjob](#lokal-per-cronjob)).
 
 ### 1. Ad hoc: `--host` + `--user`
 
@@ -160,6 +164,7 @@ Der Login muss ohne Passwort-Abfrage klappen (Key, ggf. ssh-agent), da das Skrip
 
 | Option | Wirkung |
 |---|---|
+| `--local` | nur den eigenen Rechner prüfen, ohne SSH. Nicht kombinierbar mit `--host`, `--user`, `--inventory`, `--ssh-config` |
 | `--host NAME` | nur diesen Host prüfen, mehrfach möglich. Ohne `--user` muss der Name im Inventory stehen |
 | `--user NAME` | SSH-User. Nutzt die `--host`-Angaben direkt, ohne Inventory |
 | `--inventory PFAD` | Inventory-Datei (Default: `../virtualhosts`) |
@@ -295,11 +300,74 @@ Damit lässt sich der Report in Cron oder Monitoring einbinden:
 
 Bei mehreren zutreffenden Codes gilt die Reihenfolge 2 vor 3 vor 1.
 
-Beispiel Cron mit Mail nur bei Handlungsbedarf:
+Für Cron mit Mailversand gibt es einen fertigen Wrapper, siehe
+[Lokal per Cronjob](#lokal-per-cronjob).
 
-```cron
-0 7 * * *  cd ~/tools/updates_report && ./check_updates.py --security-only > /tmp/updates.txt; [ $? -ne 0 ] && mail -s "Updates" admin@example.com < /tmp/updates.txt
+## Lokal per Cronjob
+
+Mit `--local` prüft das Skript den Rechner, auf dem es läuft. Das Remote-Skript wird
+dann per `bash` statt per `ssh` ausgeführt, Inventory und SSH-Config entfallen. Der Host
+heißt im Report wie `hostname`. Voraussetzung auf dem Server ist zusätzlich Python ≥ 3.9
+(bei Ubuntu vorinstalliert).
+
+```bash
+sudo ./check_updates.py --local                 # als root: apt-get update ohne sudo
+./check_updates.py --local --no-refresh         # als normaler User
 ```
+
+Läuft das Skript als root, ruft es `apt-get update` direkt auf, sonst per `sudo -n`.
+
+### Wrapper mit Mailversand
+
+`cron/updates-report.sh` ruft `check_updates.py` auf und verschickt das Ergebnis als
+Mail: Textreport als Mailtext, HTML-Report als HTML-Ansicht der Mail und zusätzlich als
+Anhang. Der Betreff nennt Host und Ergebnis, z. B.
+`[updates] rootserver: Security-Updates oder offene KEV-Lücke`.
+
+Die Konfiguration steht in einer env-Datei (Vorlage: `cron/updates-report.env.sample`):
+
+| Variable | Wirkung | Default |
+|---|---|---|
+| `CHECK_ARGS` | Optionen für `check_updates.py` (`--no-progress`, `--html` setzt der Wrapper) | `--local --details` |
+| `MAIL_TO` | Empfänger, mehrere mit Komma | – (Pflicht) |
+| `MAIL_FROM` | Absender | `updates-report@<hostname -f>` |
+| `MAIL_WHEN` | `problems`: nur bei Exit-Code ≠ 0, `always`: bei jedem Lauf | `problems` |
+| `MAIL_TRANSPORT` | `sendmail` (lokaler MTA), `smtp` (direkt per `curl`), `print` (nur ausgeben) | `sendmail` |
+| `MAIL_HTML_INLINE` | `1`: HTML als Mailinhalt, `0`: nur als Anhang | `1` |
+| `MAIL_SUBJECT_PREFIX` | Präfix im Betreff | `[updates]` |
+| `SENDMAIL` | sendmail-Binary | `/usr/sbin/sendmail` |
+| `SMTP_URL` | z. B. `smtps://mail.example.com:465` oder `smtp://mail.example.com:587` | – |
+| `SMTP_STARTTLS` | `1`: STARTTLS erzwingen (für Port 587) | `0` |
+| `SMTP_USER`, `SMTP_PASSWORD` | SMTP-Login (wird nicht auf der Kommandozeile übergeben) | – |
+| `REPORT_NAME` | Hostname in Betreff und Dateiname | `hostname` |
+| `REPORT_DIR` | HTML-Reports zusätzlich hier archivieren | – |
+| `REPORT_KEEP_DAYS` | ältere Reports in `REPORT_DIR` löschen | `30` |
+| `CHECK_UPDATES`, `PYTHON` | Pfad zu `check_updates.py` bzw. Interpreter | `../check_updates.py`, `python3` |
+
+`MAIL_TRANSPORT=smtp` braucht `curl`, aber keinen MTA auf dem Server. Der Wrapper geht
+auch ohne `--local`, also für den zentralen Betrieb per SSH (`CHECK_ARGS` mit
+`--inventory` …).
+
+Exit-Code des Wrappers: der von `check_updates.py`, `4` wenn der Mailversand scheitert,
+`5` bei Konfigurationsfehlern. Fehlermeldungen gehen auf stderr, also per cron-Mail an
+`MAILTO`.
+
+### Einrichtung
+
+```bash
+sudo cp -r updates_report /opt/
+sudo cp /opt/updates_report/cron/updates-report.env.sample /etc/updates-report.env
+sudo chmod 600 /etc/updates-report.env
+sudoedit /etc/updates-report.env                 # MAIL_TO, Versandweg …
+
+# Testlauf: Mail immer erzeugen und nur ausgeben statt verschicken
+sudo /opt/updates_report/cron/updates-report.sh --dry-run /etc/updates-report.env | less
+
+sudo cp /opt/updates_report/cron/updates-report.cron /etc/cron.d/updates-report
+```
+
+`cron/updates-report.cron` startet den Wrapper täglich um 06:30 als root. Aufruf:
+`updates-report.sh [--dry-run] [ENV-DATEI]`, ohne Angabe gilt `/etc/updates-report.env`.
 
 ## Datenquellen und Cache
 
@@ -327,7 +395,7 @@ python3 -m unittest discover -s tests -t .
 | Modul | Aufgabe |
 |---|---|
 | `check_updates.py` | CLI, Inventory, Ablaufsteuerung, Exit-Code |
-| `remote.py` | SSH-Aufruf und Remote-Skript (Abschnitte `===SECTION …===`) |
+| `remote.py` | SSH- bzw. lokaler Aufruf und Remote-Skript (Abschnitte `===SECTION …===`) |
 | `progress.py` | Fortschrittsanzeige auf stderr (nur im Terminal) |
 | `parsing.py` | Remote-Ausgabe in `HostReport`s zerlegen |
 | `debversion.py` | Vergleich von Debian-Versionsnummern |
@@ -337,3 +405,4 @@ python3 -m unittest discover -s tests -t .
 | `vulns.py` | offene Lücken aus installierten Paketen und OVAL ermitteln |
 | `render.py` | Textausgabe und gemeinsame Aufbereitung (Sortierung, Übersicht, Zusammenfassung) |
 | `render_html.py` | HTML-Report (`--html`) |
+| `cron/updates-report.sh` | Cron-Wrapper: Report erzeugen und per Mail verschicken |

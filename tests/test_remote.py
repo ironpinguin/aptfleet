@@ -12,6 +12,7 @@ from remote import (
     ORIGINS_SNIPPET,
     REMOTE_SCRIPT,
     HostResult,
+    build_local_command,
     build_ssh_command,
     phase_tracker,
     run_all,
@@ -194,6 +195,22 @@ class RemoteScriptTest(unittest.TestCase):
         (self.stub_dir / "sudo").chmod(0o755)
         self.assertNotIn("SUDO-CALLED", self.run_script("0"))
 
+    def _stub(self, name: str, body: str) -> None:
+        (self.stub_dir / name).write_text(f"#!/bin/sh\n{body}\n")
+        (self.stub_dir / name).chmod(0o755)
+
+    def test_refresh_as_user_uses_sudo(self):
+        self._stub("id", "echo 1000")
+        self._stub("sudo", "echo SUDO-CALLED")
+        self.assertIn("SUDO-CALLED", self.run_script("1"))
+
+    def test_refresh_as_root_skips_sudo(self):
+        self._stub("id", "echo 0")
+        self._stub("sudo", "echo SUDO-CALLED")
+        out = self.run_script("1")
+        self.assertNotIn("SUDO-CALLED", out)
+        self.assertIn("update aufgerufen", out)
+
     def test_os_prints_codename(self):
         self.assertIn("VERSION_CODENAME", REMOTE_SCRIPT)
 
@@ -258,7 +275,7 @@ class RemoteScriptTest(unittest.TestCase):
         self.assertIn("export LC_ALL=C", REMOTE_SCRIPT)
 
     def test_bounds_apt_update_and_changelog_time(self):
-        self.assertIn("timeout 90 sudo -n apt-get update", REMOTE_SCRIPT)
+        self.assertIn("timeout 90 $sudo apt-get update", REMOTE_SCRIPT)
         self.assertIn("timeout 20 apt-get changelog", REMOTE_SCRIPT)
 
 
@@ -297,6 +314,12 @@ class BuildSshCommandTest(unittest.TestCase):
                 "-l", "admin", "10.0.0.5", "bash -s -- 1",
             ],
         )
+
+
+class BuildLocalCommandTest(unittest.TestCase):
+    def test_runs_bash_without_ssh(self):
+        self.assertEqual(build_local_command(True, []), ["bash", "-s", "--", "1"])
+        self.assertEqual(build_local_command(False, ["evil pkg"]), ["bash", "-s", "--", "0", "evil pkg"])
 
 
 class RunHostTest(unittest.TestCase):
@@ -385,6 +408,25 @@ class RunAllTest(unittest.TestCase):
 
         run_all(["a"], None, False, [], 30, user="admin", runner=runner)
         self.assertEqual(calls[0][-3:], ["admin", "a", "bash -s -- 0"])
+
+    def test_local_runs_bash_instead_of_ssh(self):
+        calls = []
+
+        def runner(cmd, **kwargs):
+            calls.append((cmd, kwargs["input"]))
+            return subprocess.CompletedProcess(cmd, 0, "===END===\n", "")
+
+        results = run_all(["myhost"], None, True, ["openssl"], 30, runner=runner, local=True)
+        self.assertEqual(calls, [(["bash", "-s", "--", "1", "openssl"], REMOTE_SCRIPT)])
+        self.assertEqual(results[0].host, "myhost")
+        self.assertTrue(results[0].ok)
+
+    def test_local_errors_name_bash(self):
+        def runner(cmd, **kwargs):
+            raise subprocess.TimeoutExpired(cmd, 30)
+
+        results = run_all(["myhost"], None, True, [], 30, runner=runner, local=True)
+        self.assertEqual(results[0].error, "bash timeout nach 30s")
 
 
 if __name__ == "__main__":
