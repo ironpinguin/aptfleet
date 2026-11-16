@@ -44,6 +44,39 @@ cp -r updates_report ~/tools/
 ~/tools/updates_report/check_updates.py --help
 ```
 
+### Als .deb-Paket
+
+Für die Server gibt es ein .deb, gebaut mit [nfpm](https://nfpm.goreleaser.com). Ist
+`nfpm` nicht installiert, läuft es per Docker (`goreleaser/nfpm`). `make package` führt
+vorher die Tests aus:
+
+```bash
+cd updates_report
+make package                  # → dist/updates-report_1.0.0_all.deb
+make package VERSION=1.1.0    # andere Version
+```
+
+Installieren:
+
+```bash
+scp dist/updates-report_1.0.0_all.deb server:
+ssh server sudo apt install ./updates-report_1.0.0_all.deb
+```
+
+| Pfad | Inhalt |
+|---|---|
+| `/usr/bin/check-updates` | ruft `check_updates.py` auf, gleiche Optionen |
+| `/usr/bin/updates-report` | Cron-Wrapper mit Mailversand (siehe [Lokal per Cronjob](#lokal-per-cronjob)) |
+| `/usr/lib/updates-report/` | Module und `cron/updates-report.sh` |
+| `/etc/updates-report.env` | Konfiguration des Wrappers (conffile, Modus 0600) |
+| `/etc/cron.d/updates-report` | Cronjob, **auskommentiert**, bis `/etc/updates-report.env` angepasst ist |
+| `/etc/updates-report/` | optional `hosts.ini` und `ssh.conf` für den Betrieb per SSH (siehe [Defaults](#3-defaults)) |
+
+Die beiden Dateien unter `/etc` sind conffiles. Eigene Änderungen bleiben bei Updates
+erhalten, `apt purge updates-report` entfernt sie. Abhängigkeiten sind nur `python3` und
+`bash`. Empfohlen werden `ca-certificates` und `openssh-client`, für den Mailversand
+`curl` bzw. ein MTA.
+
 ## Hosts festlegen
 
 Es gibt drei Wege per SSH. Für den eigenen Rechner ohne SSH gibt es `--local` (siehe
@@ -72,7 +105,7 @@ Ohne `--ssh-config` wird die Default-Datei (siehe 3.) genutzt, falls sie existie
 sonst die normale `~/.ssh/config`. Wie beide Dateien aussehen, steht unter
 [Inventory-Format](#inventory-format) und [SSH-Config](#ssh-config).
 
-### 3. Defaults im Elternverzeichnis
+### 3. Defaults
 
 Ohne `--user` und `--inventory` liest das Skript zwei Dateien aus dem Verzeichnis
 **über** `updates_report/`:
@@ -84,6 +117,9 @@ Ohne `--user` und `--inventory` liest das Skript zwei Dateien aus dem Verzeichni
 └── updates_report/
     └── check_updates.py
 ```
+
+Gibt es die Datei dort nicht (z. B. beim [.deb-Paket](#als-deb-paket)), gilt stattdessen
+`/etc/updates-report/hosts.ini` bzw. `/etc/updates-report/ssh.conf`.
 
 Dann prüft ein Aufruf alle Hosts:
 
@@ -167,8 +203,8 @@ Der Login muss ohne Passwort-Abfrage klappen (Key, ggf. ssh-agent), da das Skrip
 | `--local` | nur den eigenen Rechner prüfen, ohne SSH. Nicht kombinierbar mit `--host`, `--user`, `--inventory`, `--ssh-config` |
 | `--host NAME` | nur diesen Host prüfen, mehrfach möglich. Ohne `--user` muss der Name im Inventory stehen |
 | `--user NAME` | SSH-User. Nutzt die `--host`-Angaben direkt, ohne Inventory |
-| `--inventory PFAD` | Inventory-Datei (Default: `../virtualhosts`) |
-| `--ssh-config PFAD` | SSH-Config für `ssh -F` (Default: `../ssh_config_rootserver_ansible.conf`, falls vorhanden, sonst `~/.ssh/config`) |
+| `--inventory PFAD` | Inventory-Datei (Default: `../virtualhosts`, sonst `/etc/updates-report/hosts.ini`) |
+| `--ssh-config PFAD` | SSH-Config für `ssh -F` (Default: `../ssh_config_rootserver_ansible.conf` bzw. `/etc/updates-report/ssh.conf`, falls vorhanden, sonst `~/.ssh/config`) |
 | `--security-only` | nur Security-Updates anzeigen |
 | `--details` | neue Changelog-Einträge der Updates anzeigen. Holt auch CVE-Infos für offene Lücken |
 | `--package NAME` | nur dieses Binärpaket, mehrfach möglich |
@@ -354,6 +390,17 @@ Exit-Code des Wrappers: der von `check_updates.py`, `4` wenn der Mailversand sch
 
 ### Einrichtung
 
+Mit dem [.deb-Paket](#als-deb-paket) liegen Wrapper, env-Datei und Cronjob schon an Ort
+und Stelle:
+
+```bash
+sudoedit /etc/updates-report.env                 # MAIL_TO, Versandweg …
+sudo updates-report --dry-run | less             # Testlauf, verschickt nichts
+sudoedit /etc/cron.d/updates-report              # Cron-Zeile einkommentieren
+```
+
+Ohne Paket:
+
 ```bash
 sudo cp -r updates_report /opt/
 sudo cp /opt/updates_report/cron/updates-report.env.sample /etc/updates-report.env
@@ -406,3 +453,4 @@ python3 -m unittest discover -s tests -t .
 | `render.py` | Textausgabe und gemeinsame Aufbereitung (Sortierung, Übersicht, Zusammenfassung) |
 | `render_html.py` | HTML-Report (`--html`) |
 | `cron/updates-report.sh` | Cron-Wrapper: Report erzeugen und per Mail verschicken |
+| `packaging/`, `Makefile` | .deb-Paket (nfpm-Konfiguration, Shims, Cronjob, Maintainer-Skripte) |

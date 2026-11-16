@@ -1,0 +1,68 @@
+# nfpm-Konfiguration für das .deb, gebaut mit `make package` (siehe Makefile).
+# Die Module bleiben flach in /usr/lib/updates-report (privates Verzeichnis, kein
+# Python-Paket); /usr/bin enthält nur kleine Shims.
+name: updates-report
+arch: all
+platform: linux
+version: ${VERSION}
+section: admin
+priority: optional
+maintainer: Michele Catalano <michele.catalano@mayflower.de>
+description: |
+  Report über anstehende Ubuntu-Updates mit CVE- und CISA-KEV-Infos
+  check-updates prüft den eigenen Rechner (--local) oder Hosts per SSH auf
+  anstehende deb-Updates, behobene CVEs, aktiv ausgenutzte Lücken (KEV) und
+  offene Lücken ohne Fix. updates-report verschickt den Report per Mail,
+  z. B. täglich per Cronjob.
+
+depends:
+  - python3 (>= 3.9)
+  - bash
+recommends:
+  - ca-certificates
+  - openssh-client
+suggests:
+  - curl
+  - default-mta | mail-transport-agent
+
+contents:
+  # Modi wie im Repo: check_updates.py 0755, die übrigen Module 0644
+  - src: ./*.py
+    dst: /usr/lib/updates-report/
+  - src: ./cron/updates-report.sh
+    dst: /usr/lib/updates-report/cron/updates-report.sh
+    file_info:
+      mode: 0755
+
+  - src: ./packaging/check-updates
+    dst: /usr/bin/check-updates
+    file_info:
+      mode: 0755
+  - src: ./packaging/updates-report
+    dst: /usr/bin/updates-report
+    file_info:
+      mode: 0755
+
+  - src: ./cron/updates-report.env.sample
+    dst: /etc/updates-report.env
+    type: config|noreplace
+    file_info:
+      mode: 0600
+  - src: ./packaging/updates-report.cron
+    dst: /etc/cron.d/updates-report
+    type: config|noreplace
+    file_info:
+      mode: 0644
+  - dst: /etc/updates-report
+    type: dir
+    file_info:
+      mode: 0755
+
+  - src: ./README.md
+    dst: /usr/share/doc/updates-report/README.md
+    file_info:
+      mode: 0644
+
+scripts:
+  postinstall: ./packaging/postinst
+  preremove: ./packaging/prerm

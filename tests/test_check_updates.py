@@ -12,6 +12,7 @@ from unittest import mock
 
 from check_updates import (
     SSH_CONFIG,
+    default_path,
     exit_code,
     main,
     read_inventory,
@@ -265,6 +266,18 @@ class MainTest(unittest.TestCase):
         self.assertEqual(resolve_ssh_config(None, existing), existing)
         self.assertIsNone(resolve_ssh_config(None, missing))
         self.assertEqual(resolve_ssh_config(missing, existing), missing)
+
+    def test_default_path_prefers_repo_then_etc(self):
+        base = Path(self._tmp.name) / "default_path"
+        base.mkdir()
+        repo = base / "virtualhosts"
+        etc = base / "hosts.ini"
+        # Keine Datei da: die /etc-Variante, damit Fehlermeldung/Hilfe dorthin zeigen
+        self.assertEqual(default_path(repo, etc), etc)
+        etc.write_text("")
+        self.assertEqual(default_path(repo, etc), etc)
+        repo.write_text("")
+        self.assertEqual(default_path(repo, etc), repo)
 
     def test_missing_inventory_returns_2(self):
         self.inventory = Path(self._tmp.name) / "gibtsnicht"
