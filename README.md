@@ -1,456 +1,461 @@
-# updates_report
+# aptfleet
 
-Zeigt die anstehenden deb-Updates auf einem oder mehreren Ubuntu-Hosts, zusammen mit den
-Security-Infos dazu:
+[![CI](https://github.com/ironpinguin/aptfleet/actions/workflows/ci.yml/badge.svg)](https://github.com/ironpinguin/aptfleet/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-- **Updates pro Host** mit Security-Kennzeichnung und den CVEs, die das Update behebt
-  (aus dem Changelog), inklusive Ubuntu-Priorität (`critical`, `high`, …)
-- **KEV-Markierung:** CVEs, die laut [CISA Known Exploited Vulnerabilities](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)
-  aktiv ausgenutzt werden, sind als `KEV` hervorgehoben
-- **Offene Lücken ohne Fix:** installierte Pakete mit CVEs, für die es noch kein Update
-  gibt. Angezeigt werden nur CVEs auf KEV oder mit Priorität `high`/`critical`
-  (Quelle: Ubuntu-OVAL-Daten)
-- **Kernel:** veraltete laufende Kernel (Reboot nötig) und überholte Paketversionen
-- optional **Neu auf KEV:** die zuletzt in den KEV-Katalog aufgenommenen CVEs
+Shows the pending apt updates on one or many Ubuntu hosts, together with the
+security information that matters for deciding what to patch first:
 
-Auf den Hosts wird nur gelesen. Pro Host gibt es eine SSH-Session. Das Remote-Skript
-kommt per stdin, auf dem Host wird nichts abgelegt.
+- **Updates per host**, marked as security updates, with the CVEs each update fixes
+  (taken from the package changelog) and their Ubuntu priority (`critical`, `high`, …)
+- **KEV markers:** CVEs that are actively exploited according to the
+  [CISA Known Exploited Vulnerabilities](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)
+  catalog are highlighted as `KEV`
+- **Open vulnerabilities without a fix:** installed packages with CVEs that have no
+  update yet. Only CVEs on KEV or with priority `high`/`critical` are shown
+  (source: Ubuntu OVAL data)
+- **Kernel:** outdated running kernels (reboot required) and superseded package versions
+- optionally **new on KEV:** the CVEs most recently added to the KEV catalog
 
-Alternativ läuft das Skript mit `--local` direkt auf dem Server, ohne SSH, z. B. als
-Cronjob mit Mailversand des HTML-Reports (siehe [Lokal per Cronjob](#lokal-per-cronjob)).
+It is agentless: hosts are only read, over one SSH session per host. The remote
+script is sent on stdin, nothing is stored on the host. With `--local` it checks the
+machine it runs on instead, for example from a cron job that mails the report
+(see [Local cron job with mail](#local-cron-job-with-mail)).
 
-## Voraussetzungen
+aptfleet is plain Python 3 and Bash, with no dependencies beyond the standard library.
 
-**Lokal** (wo das Skript läuft):
+## Requirements
 
-- Python ≥ 3.9, nur Standardbibliothek, kein `pip install` nötig
-- `ssh`-Client mit Key-Login auf die Hosts. Das Skript nutzt `BatchMode=yes`, es fragt
-  also nie nach einem Passwort
-- Internetzugang zu `ubuntu.com`, `security-metadata.canonical.com` und `cisa.gov`.
-  Ohne diese Quellen läuft der Report trotzdem, nur mit weniger Infos (siehe Exit-Code 3)
+**Where aptfleet runs:**
 
-**Auf den Hosts:**
+- Python ≥ 3.9, standard library only, no `pip install` needed
+- an `ssh` client with key-based login to the hosts. aptfleet uses `BatchMode=yes`, so it
+  never asks for a password
+- internet access to `ubuntu.com`, `security-metadata.canonical.com` and `cisa.gov`.
+  Without these sources the report still runs, with less information (see exit code 3)
 
-- Ubuntu mit `bash`, `apt`, `dpkg-query`, `timeout` (Standardinstallation)
-- Für das `apt-get update` vor der Prüfung: `sudo` ohne Passwort für den SSH-User.
-  Ohne sudo-Rechte mit `--no-refresh` aufrufen (siehe [Betrieb ohne sudo](#betrieb-ohne-sudo))
+**On the hosts:**
+
+- Ubuntu with `bash`, `apt`, `dpkg-query`, `timeout` (all part of a standard install)
+- for the `apt-get update` before the check: passwordless `sudo` for the SSH user.
+  Without sudo rights, use `--no-refresh` (see [Running without sudo](#running-without-sudo))
 
 ## Installation
 
-Das Verzeichnis `updates_report/` irgendwohin kopieren und fertig:
+### .deb package
+
+Download `aptfleet_<version>_all.deb` from the
+[releases page](https://github.com/ironpinguin/aptfleet/releases) and install it:
 
 ```bash
-cp -r updates_report ~/tools/
-~/tools/updates_report/aptfleet.py --help
+sudo apt install ./aptfleet_1.0.0_all.deb
 ```
 
-### Als .deb-Paket
-
-Für die Server gibt es ein .deb, gebaut mit [nfpm](https://nfpm.goreleaser.com). Ist
-`nfpm` nicht installiert, läuft es per Docker (`goreleaser/nfpm`). `make package` führt
-vorher die Tests aus:
-
-```bash
-cd updates_report
-make package                  # → dist/aptfleet-mail_1.0.0_all.deb
-make package VERSION=1.1.0    # andere Version
-```
-
-Installieren:
-
-```bash
-scp dist/aptfleet-mail_1.0.0_all.deb server:
-ssh server sudo apt install ./aptfleet-mail_1.0.0_all.deb
-```
-
-| Pfad | Inhalt |
+| Path | Content |
 |---|---|
-| `/usr/bin/aptfleet` | ruft `aptfleet.py` auf, gleiche Optionen |
-| `/usr/bin/aptfleet-mail` | Cron-Wrapper mit Mailversand (siehe [Lokal per Cronjob](#lokal-per-cronjob)) |
-| `/usr/lib/aptfleet/` | Module und `cron/aptfleet-mail.sh` |
-| `/etc/aptfleet/mail.env` | Konfiguration des Wrappers (conffile, Modus 0600) |
-| `/etc/cron.d/aptfleet` | Cronjob, **auskommentiert**, bis `/etc/aptfleet/mail.env` angepasst ist |
-| `/etc/aptfleet/` | optional `hosts.ini` und `ssh.conf` für den Betrieb per SSH (siehe [Defaults](#3-defaults)) |
+| `/usr/bin/aptfleet` | runs `aptfleet.py`, same options |
+| `/usr/bin/aptfleet-mail` | cron wrapper that mails the report (see [Local cron job with mail](#local-cron-job-with-mail)) |
+| `/usr/lib/aptfleet/` | modules and `cron/aptfleet-mail.sh` |
+| `/etc/aptfleet/mail.env` | configuration of the mail wrapper (conffile, mode 0600) |
+| `/etc/cron.d/aptfleet` | cron job, **commented out** until `/etc/aptfleet/mail.env` is configured |
+| `/etc/aptfleet/` | optional `hosts.ini` and `ssh.conf` for checking hosts over SSH (see [Defaults](#3-defaults)) |
 
-Die beiden Dateien unter `/etc` sind conffiles. Eigene Änderungen bleiben bei Updates
-erhalten, `apt purge aptfleet-mail` entfernt sie. Abhängigkeiten sind nur `python3` und
-`bash`. Empfohlen werden `ca-certificates` und `openssh-client`, für den Mailversand
-`curl` bzw. ein MTA.
+Both files under `/etc` are conffiles: your changes survive package updates, and
+`apt purge aptfleet` removes them. The only dependencies are `python3` and `bash`.
+`ca-certificates` and `openssh-client` are recommended, and `curl` or an MTA for
+sending mail.
 
-## Hosts festlegen
+To build the package yourself, run `make package`. It uses
+[nfpm](https://nfpm.goreleaser.com), or the `goreleaser/nfpm` Docker image if nfpm is
+not installed, and runs the tests first:
 
-Es gibt drei Wege per SSH. Für den eigenen Rechner ohne SSH gibt es `--local` (siehe
-[Lokal per Cronjob](#lokal-per-cronjob)).
+```bash
+make package                  # → dist/aptfleet_1.0.0_all.deb
+make package VERSION=1.1.0    # different version
+```
+
+### From a checkout
+
+No installation needed:
+
+```bash
+git clone https://github.com/ironpinguin/aptfleet.git
+./aptfleet/aptfleet.py --help
+```
+
+## Choosing hosts
+
+There are three ways to check hosts over SSH. To check the local machine without SSH,
+use `--local` (see [Local cron job with mail](#local-cron-job-with-mail)).
 
 ### 1. Ad hoc: `--host` + `--user`
 
-Hosts direkt angeben. Es gilt die normale `~/.ssh/config` (Aliase, Keys, `ProxyJump`),
-außer es wird `--ssh-config` angegeben:
+Name the hosts directly. Your normal `~/.ssh/config` applies (aliases, keys,
+`ProxyJump`) unless you pass `--ssh-config`:
 
 ```bash
-./aptfleet.py --user admin --host web1.example.com --host 10.0.0.12
-./aptfleet.py --user ansiadm --host mein-alias-aus-ssh-config
+aptfleet --user admin --host web1.example.com --host 10.0.0.12
+aptfleet --user admin --host my-alias-from-ssh-config
 ```
 
-### 2. Eigenes Inventory: `--inventory` / `--ssh-config`
+### 2. Your own inventory: `--inventory` / `--ssh-config`
 
-Inventory und SSH-Config können irgendwo liegen:
+The inventory and the SSH config can live anywhere:
 
 ```bash
-./aptfleet.py --inventory ~/etc/hosts.ini --ssh-config ~/etc/ssh_hosts.conf
-./aptfleet.py --inventory ~/etc/hosts.ini     # SSH über ~/.ssh/config
+aptfleet --inventory ~/fleet/hosts.ini --ssh-config ~/fleet/ssh.conf
+aptfleet --inventory ~/fleet/hosts.ini     # SSH via ~/.ssh/config
 ```
 
-Ohne `--ssh-config` wird die Default-Datei (siehe 3.) genutzt, falls sie existiert,
-sonst die normale `~/.ssh/config`. Wie beide Dateien aussehen, steht unter
-[Inventory-Format](#inventory-format) und [SSH-Config](#ssh-config).
+Without `--ssh-config`, the default file (see 3.) is used if it exists, otherwise
+your normal `~/.ssh/config`. Both formats are described under
+[Inventory format](#inventory-format) and [SSH config](#ssh-config).
 
 ### 3. Defaults
 
-Ohne `--user` und `--inventory` liest das Skript zwei Dateien aus dem Verzeichnis
-**über** `updates_report/`:
+Without `--user` and `--inventory`, aptfleet reads two files, the first one found:
 
-```
-<projekt>/
-├── virtualhosts                          # Inventory
-├── ssh_config_rootserver_ansible.conf    # SSH-Config, wird per ssh -F genutzt
-└── updates_report/
-    └── aptfleet.py
-```
+| File | Looked up in |
+|---|---|
+| inventory | `~/.config/aptfleet/hosts.ini`, then `/etc/aptfleet/hosts.ini` |
+| SSH config | `~/.config/aptfleet/ssh.conf`, then `/etc/aptfleet/ssh.conf` |
 
-Gibt es die Datei dort nicht (z. B. beim [.deb-Paket](#als-deb-paket)), gilt stattdessen
-`/etc/aptfleet/hosts.ini` bzw. `/etc/aptfleet/ssh.conf`.
-
-Dann prüft ein Aufruf alle Hosts:
+`~/.config` follows `$XDG_CONFIG_HOME` if set. A single call then checks all hosts:
 
 ```bash
-./aptfleet.py
-./aptfleet.py --host host-b      # nur einer (muss im Inventory stehen)
+aptfleet
+aptfleet --host db1       # only this one (must be in the inventory)
 ```
 
-Fehlt das Inventory, endet das Skript mit Exit-Code 2 und nennt `--inventory` bzw.
+If there is no inventory, aptfleet exits with code 2 and points to `--inventory` or
 `--host`/`--user`.
 
-### Inventory-Format
+### Inventory format
 
-Eine Textdatei im Stil eines Ansible-INI-Inventories. Ein bestehendes Ansible-Inventory
-lässt sich in der Regel direkt verwenden:
+A text file in the style of an Ansible INI inventory. An existing Ansible inventory can
+usually be used as is:
 
 ```ini
-# Kommentar
+# comment
 [ubuntu]
-host-a
-host-b              # Kommentar hinter dem Host ist erlaubt
-#host-c             auskommentiert, wird übersprungen
+web1
+web2                # a comment after the host is allowed
+#web3              commented out, skipped
 
-[datenbanken]
-db-1 ansible_host=10.0.0.20
+[databases]
+db1 ansible_host=10.0.0.20
 
 [all:vars]
-ansible_user=ansiadm   # wird ignoriert
+ansible_user=admin   # ignored
 
-[server:children]
-ubuntu                 # Gruppennamen, keine Hosts – wird ignoriert
+[servers:children]
+ubuntu               # group names, not hosts – ignored
 ```
 
-Regeln:
+Rules:
 
-- Ein Host pro Zeile. Es zählt nur das **erste Wort** der Zeile.
-- Leerzeilen und Zeilen, die mit `#` beginnen, werden übersprungen.
-- Gruppenköpfe wie `[gruppe]` werden übersprungen. **Gruppen haben keine Bedeutung:** Es
-  werden alle Hosts aus allen Gruppen geprüft. Nur einzelne Hosts lassen sich mit
-  `--host` auswählen.
-- Der Inhalt von `[gruppe:vars]` (Variablen) und `[gruppe:children]` (Gruppennamen) wird
-  komplett übersprungen, ebenso jede Zeile, deren erstes Wort ein `=` enthält.
-- Ansible-Variablen hinter dem Namen (`ansible_host=`, `ansible_user=` …) werden
-  **ignoriert**. Der Name wird so an `ssh` übergeben. Er muss also ein Alias aus der
-  SSH-Config, ein auflösbarer Hostname oder eine IP sein. Im Beispiel oben verbindet sich
-  das Skript zu `db-1`, nicht zu `10.0.0.20`.
-- Steht ein Host in mehreren Gruppen, wird er trotzdem nur einmal geprüft, an der
-  Stelle seines ersten Auftretens.
-- YAML-Inventories werden nicht unterstützt.
+- One host per line. Only the **first word** of the line counts.
+- Empty lines and lines starting with `#` are skipped.
+- Group headers like `[group]` are skipped. **Groups have no meaning:** all hosts from all
+  groups are checked. Use `--host` to pick single hosts.
+- The content of `[group:vars]` (variables) and `[group:children]` (group names) is
+  skipped completely, as is every line whose first word contains `=`.
+- Ansible variables after the name (`ansible_host=`, `ansible_user=` …) are **ignored**.
+  The name is passed to `ssh` as is, so it must be an alias from the SSH config, a
+  resolvable host name or an IP address. In the example above aptfleet connects to
+  `db1`, not to `10.0.0.20`.
+- A host listed in several groups is checked once, at the position where it first
+  appears.
+- YAML inventories are not supported.
 
-### SSH-Config
+### SSH config
 
-Eine normale OpenSSH-Config, die per `ssh -F` übergeben wird. Für jeden Namen aus dem
-Inventory gibt es einen passenden `Host`-Block:
+A normal OpenSSH config, passed with `ssh -F`. It has a matching `Host` block for every
+name in the inventory:
 
 ```
-Host host-a
+Host web1
   HostName 192.0.2.10
-  User ansiadm
-  IdentityFile ~/.ssh/ansible_ed25519
+  User admin
+  IdentityFile ~/.ssh/fleet_ed25519
 
-Host host-b
-  HostName 10.0.0.5
-  User ansiadm
-  IdentityFile ~/.ssh/ansible_ed25519
-  ProxyJump host-a
+Host db1
+  HostName 10.0.0.20
+  User admin
+  IdentityFile ~/.ssh/fleet_ed25519
+  ProxyJump web1
 ```
 
-Mit `-F` liest `ssh` **nur** diese Datei, `~/.ssh/config` wird dann nicht ausgewertet.
-Der Login muss ohne Passwort-Abfrage klappen (Key, ggf. ssh-agent), da das Skript mit
-`BatchMode=yes` arbeitet. Testen: `ssh -F <config> host-a true`.
+With `-F`, `ssh` reads **only** this file; `~/.ssh/config` is not used then. Login must
+work without a password prompt (key, ssh-agent if needed), because aptfleet uses
+`BatchMode=yes`. Test it with `ssh -F <config> web1 true`.
 
-## Aufruf und Optionen
+## Usage and options
 
 ```bash
-./aptfleet.py [Optionen]
+aptfleet [options]
 ```
 
-| Option | Wirkung |
+| Option | Effect |
 |---|---|
-| `--local` | nur den eigenen Rechner prüfen, ohne SSH. Nicht kombinierbar mit `--host`, `--user`, `--inventory`, `--ssh-config` |
-| `--host NAME` | nur diesen Host prüfen, mehrfach möglich. Ohne `--user` muss der Name im Inventory stehen |
-| `--user NAME` | SSH-User. Nutzt die `--host`-Angaben direkt, ohne Inventory |
-| `--inventory PFAD` | Inventory-Datei (Default: `../virtualhosts`, sonst `/etc/aptfleet/hosts.ini`) |
-| `--ssh-config PFAD` | SSH-Config für `ssh -F` (Default: `../ssh_config_rootserver_ansible.conf` bzw. `/etc/aptfleet/ssh.conf`, falls vorhanden, sonst `~/.ssh/config`) |
-| `--security-only` | nur Security-Updates anzeigen |
-| `--details` | neue Changelog-Einträge der Updates anzeigen. Holt auch CVE-Infos für offene Lücken |
-| `--package NAME` | nur dieses Binärpaket, mehrfach möglich |
-| `--no-refresh` | kein `apt-get update` vorher, braucht dann kein sudo. Zeigt pro Host, wie alt die Paketlisten sind |
-| `--timeout SEKUNDEN` | Timeout pro Host (Default 120) |
-| `--verbose` | nicht parsebare Zeilen und Pakete ohne Ubuntu-Herkunft (PPAs, Fremd-Repos) anzeigen |
-| `--kev-recent [TAGE]` | in den letzten TAGE (Default 7) neu auf KEV aufgenommene CVEs auflisten |
-| `--html PFAD` | Report zusätzlich als HTML-Datei schreiben (siehe [HTML-Report](#html-report)) |
-| `--no-progress` | keine Fortschrittsanzeige auf stderr (siehe unten) |
+| `--local` | check only the local machine, without SSH. Cannot be combined with `--host`, `--user`, `--inventory`, `--ssh-config` |
+| `--host NAME` | check only this host, repeatable. Without `--user` the name must be in the inventory |
+| `--user NAME` | SSH user. Uses the `--host` names directly, without an inventory |
+| `--inventory PATH` | inventory file (see [Defaults](#3-defaults)) |
+| `--ssh-config PATH` | SSH config for `ssh -F` (see [Defaults](#3-defaults); otherwise `~/.ssh/config`) |
+| `--security-only` | show security updates only |
+| `--details` | show the new changelog entries of each update. Also fetches CVE details for open vulnerabilities |
+| `--package NAME` | only this binary package, repeatable |
+| `--no-refresh` | no `apt-get update` first, so no sudo needed. Shows per host how old the package lists are |
+| `--timeout SECONDS` | timeout per host (default 120) |
+| `--verbose` | show unparsable lines and packages not from Ubuntu (PPAs, third-party repositories) |
+| `--kev-recent [DAYS]` | list CVEs added to KEV in the last DAYS days (default 7) |
+| `--html PATH` | also write the report as an HTML file (see [HTML report](#html-report)) |
+| `--no-progress` | no progress output on stderr (see below) |
 
-Beispiele:
+Examples:
 
 ```bash
-./aptfleet.py --security-only
-./aptfleet.py --host host-a --details
-./aptfleet.py --package openssh-server --package sudo
-./aptfleet.py --kev-recent 14
-./aptfleet.py --details --html ~/reports/updates-$(date +%F).html
+aptfleet --security-only
+aptfleet --host web1 --details
+aptfleet --package openssh-server --package sudo
+aptfleet --kev-recent 14
+aptfleet --details --html ~/reports/updates-$(date +%F).html
 ```
 
-Bis zu 6 Hosts werden parallel abgefragt. Die Ausgabe ist farbig, wenn sie in ein
-Terminal geht; bei Umleitung in eine Datei oder Pipe ist sie unformatiert.
+Up to 6 hosts are checked in parallel. Output is coloured when it goes to a terminal and
+plain when redirected to a file or pipe.
 
-**Fortschritt:** Läuft das Skript im Terminal, zeigt es auf stderr, was gerade passiert.
-Eine Statuszeile nennt für jeden laufenden Host den aktuellen Schritt (`SSH-Verbindung`,
-`apt-get update`, `Changelog 3/12: openssl`, …). Fertige Hosts und die folgenden Schritte
-(KEV-Liste, Ubuntu-Schwachstellendaten, CVE-Infos) erscheinen als eigene Zeilen:
+**Progress:** in a terminal, aptfleet shows on stderr what it is doing. A status line
+names the current step of every running host (`SSH connection`, `apt-get update`,
+`Changelog 3/12: openssl`, …). Finished hosts and the steps after them (KEV list, Ubuntu
+vulnerability data, CVE info) appear as lines of their own:
 
 ```text
-» 3 Host(s) prüfen …
-  ✓ [1/3] webserver-ansible fertig (14s)
-  ✗ [2/3] pdf-ansible: ssh timeout nach 120s (120s)
-  [2/3] rootserver-ansible: Changelog 4/9: linux-meta
+» Checking 3 host(s) …
+  ✓ [1/3] web1 done (14s)
+  ✗ [2/3] db1: ssh timeout after 120s (120s)
+  [2/3] app1: Changelog 4/9: linux-meta
 ```
 
-Ist stderr kein Terminal (cron, `2>datei`), gibt es keine Fortschrittsanzeige. Mit
-`--no-progress` lässt sie sich auch im Terminal abschalten. Der Report auf stdout ist in
-beiden Fällen gleich.
+When stderr is not a terminal (cron, `2>file`) there is no progress output. Use
+`--no-progress` to turn it off in a terminal too. The report on stdout is the same
+either way.
 
-### Terminal-Ausgabe
+### Terminal output
 
-Bei mehreren Hosts steht oben eine Übersicht, darunter folgt pro Host ein Block mit den
-Updates und den offenen Lücken:
+With several hosts an overview comes first, followed by one block per host with its
+updates and open vulnerabilities:
 
 ```
-Host                Ubuntu  Updates  Security  KEV-Fix  Offene Lücken
-rootserver-ansible  24.04         5         3        2  1 (1 KEV)
-pdf-ansible         FEHLER: ssh timeout nach 120s
+Host  Ubuntu  Updates  Security  KEV fix  Open vulnerabilities
+web1  24.04         5         3        2  1 (1 KEV)
+db1   ERROR: ssh timeout after 120s
 
-━━ rootserver-ansible (Ubuntu 24.04) — 5 Updates, 3 Security, 1 offene Lücke ━━
+━━ web1 (Ubuntu 24.04) — 5 updates, 3 security, 1 open vulnerability ━━
    Updates:
-      Paket       Version                                                        CVEs
- SEC  libssl3t64  3.0.13-0ubuntu3.4 → 3.0.13-0ubuntu3.5                          CVE-2025-9231, CVE-2025-9232 (high, KEV)
- SEC  openssl     3.0.13-0ubuntu3.4 → 3.0.13-0ubuntu3.5                          CVE-2025-9231, CVE-2025-9232 (high, KEV)
- SEC  libxml2     2.9.14+dfsg-1.3ubuntu3.1 → 2.9.14+dfsg-1.3ubuntu3.1+esm1       (Changelog nicht verfügbar)
+      Package     Version                                                        CVEs
+ SEC  libssl3t64  3.0.13-0ubuntu3.4 → 3.0.13-0ubuntu3.5                          CVE-2025-9231 (high), CVE-2025-9232 (high, KEV)
+ SEC  openssl     3.0.13-0ubuntu3.4 → 3.0.13-0ubuntu3.5                          CVE-2025-9231 (high), CVE-2025-9232 (high, KEV)
+ SEC  libxml2     2.9.14+dfsg-1.3ubuntu3.1 → 2.9.14+dfsg-1.3ubuntu3.1+esm1       (changelog unavailable)
       docker-ce   5:28.0.4-1~ubuntu.24.04~noble → 5:28.1.1-1~ubuntu.24.04~noble
       tzdata      2025a-0ubuntu0.24.04 → 2025b-0ubuntu0.24.04.1
-   Offene Lücken ohne Fix:
-      Paket    installiert               CVE                   Status
- KEV  libxml2  2.9.14+dfsg-1.3ubuntu3.1  CVE-2025-7000 (high)  kein Fix
+   Open vulnerabilities (no fix available yet):
+      Package  Installed                 CVE                   Status
+ KEV  libxml2  2.9.14+dfsg-1.3ubuntu3.1  CVE-2025-7000 (high)  no fix
 
-━━ pdf-ansible — FEHLER: ssh timeout nach 120s ━━
+━━ db1 — ERROR: ssh timeout after 120s ━━
 
-Zusammenfassung: 2 Hosts, 5 Updates, 3 Security, 2 KEV-Fix verfügbar, 1 offene Lücke (1 KEV), 1 Host nicht erreichbar
+Summary: 2 hosts, 5 updates, 3 security, 2 KEV fixes available, 1 open vulnerability (1 KEV), 1 host unreachable
 ```
 
-`SEC` = Security-Update, `KEV` = Lücke auf der CISA-KEV-Liste. In der Übersicht heißt
-`KEV-Fix`: so viele Updates beheben eine KEV-Lücke. `nicht geprüft` heißt: Die Lücken-Prüfung
-war für den Host nicht möglich (Grund steht im Host-Block).
+`SEC` = security update, `KEV` = vulnerability on the CISA KEV list. In the overview,
+`KEV fix` is the number of updates that fix a KEV vulnerability. `not checked` means the
+vulnerability check was not possible for that host (the reason is in the host block).
 
-### HTML-Report
+### HTML report
 
-`--html PFAD` schreibt denselben Report zusätzlich als HTML-Datei. Die Terminal-Ausgabe
-bleibt unverändert. `--security-only`, `--details` und `--kev-recent` wirken auch auf die
-Datei.
+`--html PATH` also writes the report as an HTML file. The terminal output stays the same.
+`--security-only`, `--details` and `--kev-recent` apply to the file as well.
 
-- Eine einzige Datei: CSS ist eingebettet, kein JavaScript, keine externen Ressourcen.
-  Sie kann also gemailt oder archiviert werden
-- Übersichtstabelle mit Links zu den Host-Abschnitten, Hosts mit Handlungsbedarf
-  (Security, KEV, Fehler) sind rot markiert
-- Mit `--details` stehen Changelog und CVE-Beschreibungen in aufklappbaren Blöcken.
-  Beim Drucken (bzw. „Als PDF speichern“ im Browser) sind sie automatisch aufgeklappt
-- Hell/Dunkel folgt der Systemeinstellung
+- a single file: CSS is embedded, no JavaScript, no external resources, so it can be
+  mailed or archived
+- an overview table linking to the host sections; hosts that need attention (security,
+  KEV, errors) are marked red
+- with `--details`, changelogs and CVE descriptions are in collapsible blocks. When
+  printing (or "Save as PDF" in the browser) they are expanded automatically
+- light/dark follows the system setting
 
-Kann die Datei nicht geschrieben werden, gibt es eine Fehlermeldung, und der Exit-Code
-ist 2. Die Terminal-Ausgabe erscheint trotzdem.
+If the file cannot be written, aptfleet prints an error and exits with code 2. The
+terminal output still appears.
 
-## Betrieb ohne sudo
+## Running without sudo
 
-Das Skript braucht sudo nur für das `apt-get update` vor der Prüfung. Mit `--no-refresh`
-läuft es mit einem normalen User ohne sudo-Rechte. Ausgewertet werden dann die
-Paketlisten, die auf dem Host schon vorhanden sind. Ubuntu aktualisiert sie per
-`apt-daily.timer` normalerweise einmal am Tag.
+aptfleet needs sudo only for the `apt-get update` before the check. With `--no-refresh`
+it runs as a normal user without sudo rights. It then uses the package lists already on
+the host, which Ubuntu normally refreshes once a day via `apt-daily.timer`.
 
-Weil die Infos dann veraltet sein können, steht bei jedem Host eine Warnung mit dem Stand:
+Because the information may be outdated, every host gets a warning with the age of its
+lists:
 
 ```
-━━ webserver (Ubuntu 24.04) — 3 Updates, 1 Security ━━
-  ⚠ Paketlisten nicht aktualisiert (--no-refresh), Stand 2026-11-12 06:12 (vor 2 Tagen) – Updates und Security-Infos können veraltet sein
+━━ web1 (Ubuntu 24.04) — 3 updates, 1 security ━━
+  ⚠ Package lists not refreshed (--no-refresh), last updated 2026-11-12 06:12 (2 days ago) – updates and security info may be outdated
 ```
 
-Schlägt das Update ohne `--no-refresh` fehl (z. B. sudo verlangt ein Passwort), läuft der
-Report ebenfalls weiter, mit der Fehlermeldung und demselben Stand.
+If the update fails without `--no-refresh` (for example because sudo asks for a
+password), the report continues as well, with the error message and the same age.
 
-Den Stand ermittelt das Skript aus dem neuesten dieser Zeitstempel auf dem Host:
+aptfleet takes the age from the newest of these timestamps on the host:
 
-1. `/var/lib/apt/periodic/update-success-stamp` bzw. `update-stamp`
-   (von update-notifier bzw. `apt-daily`)
-2. Änderungszeit von `/var/lib/apt/lists/partial` (ändert apt bei jedem Update)
-3. neueste `*Release`-Datei in `/var/lib/apt/lists` (nur das Veröffentlichungsdatum des
-   Repos, daher ein grober Notbehelf)
+1. `/var/lib/apt/periodic/update-success-stamp` or `update-stamp`
+   (from update-notifier or `apt-daily`)
+2. modification time of `/var/lib/apt/lists/partial` (apt touches it on every update)
+3. the newest `*Release` file in `/var/lib/apt/lists` (only the publication date of the
+   repository, so a rough fallback)
 
-Findet es keinen davon, heißt es „Stand unbekannt“. Das Alter wird mit der Uhr des Hosts
-berechnet, eine abweichende lokale Uhr spielt also keine Rolle.
+If none exists, it says "last updated unknown". The age is computed with the host's
+clock, so a skewed local clock does not matter.
 
-Achtung beim Exit-Code: Bei alten Paketlisten kann er `0` sein, obwohl längst
-Security-Updates bereitstehen.
+Note on the exit code: with old package lists it can be `0` although security updates
+have long been available.
 
-## Exit-Codes
+## Exit codes
 
-Damit lässt sich der Report in Cron oder Monitoring einbinden:
+For cron jobs and monitoring:
 
-| Code | Bedeutung |
+| Code | Meaning |
 |---|---|
-| `0` | nichts Dringendes: keine Security-Updates, keine offene KEV-Lücke |
-| `1` | Security-Updates stehen an **oder** eine offene KEV-Lücke ohne Fix existiert |
-| `2` | mindestens ein Host nicht erreichbar, oder Aufruf-/Inventory-Fehler |
-| `3` | Prüfung unvollständig: KEV-Liste oder Ubuntu-Schwachstellendaten nicht abrufbar bzw. Host-Daten fehlen |
+| `0` | nothing urgent: no security updates, no open KEV vulnerability |
+| `1` | security updates are pending **or** an open KEV vulnerability without a fix exists |
+| `2` | at least one host unreachable, or a usage/inventory error |
+| `3` | check incomplete: KEV list or Ubuntu vulnerability data unavailable, or host data missing |
 
-Bei mehreren zutreffenden Codes gilt die Reihenfolge 2 vor 3 vor 1.
+If several apply, 2 wins over 3, and 3 over 1.
 
-Für Cron mit Mailversand gibt es einen fertigen Wrapper, siehe
-[Lokal per Cronjob](#lokal-per-cronjob).
+## Local cron job with mail
 
-## Lokal per Cronjob
-
-Mit `--local` prüft das Skript den Rechner, auf dem es läuft. Das Remote-Skript wird
-dann per `bash` statt per `ssh` ausgeführt, Inventory und SSH-Config entfallen. Der Host
-heißt im Report wie `hostname`. Voraussetzung auf dem Server ist zusätzlich Python ≥ 3.9
-(bei Ubuntu vorinstalliert).
+With `--local`, aptfleet checks the machine it runs on. The remote script runs through
+`bash` instead of `ssh`; no inventory or SSH config is needed. The host is named after
+`hostname` in the report. The server then also needs Python ≥ 3.9 (preinstalled on
+Ubuntu).
 
 ```bash
-sudo ./aptfleet.py --local                 # als root: apt-get update ohne sudo
-./aptfleet.py --local --no-refresh         # als normaler User
+sudo aptfleet --local                 # as root: apt-get update without sudo
+aptfleet --local --no-refresh         # as a normal user
 ```
 
-Läuft das Skript als root, ruft es `apt-get update` direkt auf, sonst per `sudo -n`.
+Running as root, aptfleet calls `apt-get update` directly, otherwise through `sudo -n`.
 
-### Wrapper mit Mailversand
+### Mail wrapper: `aptfleet-mail`
 
-`cron/aptfleet-mail.sh` ruft `aptfleet.py` auf und verschickt das Ergebnis als
-Mail: Textreport als Mailtext, HTML-Report als HTML-Ansicht der Mail und zusätzlich als
-Anhang. Der Betreff nennt Host und Ergebnis, z. B.
-`[updates] rootserver: Security-Updates oder offene KEV-Lücke`.
+`aptfleet-mail` (`cron/aptfleet-mail.sh` in a checkout) runs aptfleet and mails the
+result: the text report as the mail body, the HTML report as the HTML view of the mail
+and as an attachment. The subject names the host and the result, for example
+`[aptfleet] web1: security updates or open KEV vulnerability`.
 
-Die Konfiguration steht in einer env-Datei (Vorlage: `cron/mail.env.sample`):
+It is configured in an env file (template: `cron/mail.env.sample`):
 
-| Variable | Wirkung | Default |
+| Variable | Effect | Default |
 |---|---|---|
-| `APTFLEET_ARGS` | Optionen für `aptfleet.py` (`--no-progress`, `--html` setzt der Wrapper) | `--local --details` |
-| `MAIL_TO` | Empfänger, mehrere mit Komma | – (Pflicht) |
-| `MAIL_FROM` | Absender | `aptfleet@<hostname -f>` |
-| `MAIL_WHEN` | `problems`: nur bei Exit-Code ≠ 0, `always`: bei jedem Lauf | `problems` |
-| `MAIL_TRANSPORT` | `sendmail` (lokaler MTA), `smtp` (direkt per `curl`), `print` (nur ausgeben) | `sendmail` |
-| `MAIL_HTML_INLINE` | `1`: HTML als Mailinhalt, `0`: nur als Anhang | `1` |
-| `MAIL_SUBJECT_PREFIX` | Präfix im Betreff | `[updates]` |
-| `SENDMAIL` | sendmail-Binary | `/usr/sbin/sendmail` |
-| `SMTP_URL` | z. B. `smtps://mail.example.com:465` oder `smtp://mail.example.com:587` | – |
-| `SMTP_STARTTLS` | `1`: STARTTLS erzwingen (für Port 587) | `0` |
-| `SMTP_USER`, `SMTP_PASSWORD` | SMTP-Login (wird nicht auf der Kommandozeile übergeben) | – |
-| `REPORT_NAME` | Hostname in Betreff und Dateiname | `hostname` |
-| `REPORT_DIR` | HTML-Reports zusätzlich hier archivieren | – |
-| `REPORT_KEEP_DAYS` | ältere Reports in `REPORT_DIR` löschen | `30` |
-| `APTFLEET`, `PYTHON` | Pfad zu `aptfleet.py` bzw. Interpreter | `../aptfleet.py`, `python3` |
+| `APTFLEET_ARGS` | options for aptfleet (the wrapper adds `--no-progress` and `--html`) | `--local --details` |
+| `MAIL_TO` | recipients, comma-separated | – (required) |
+| `MAIL_FROM` | sender | `aptfleet@<hostname -f>` |
+| `MAIL_WHEN` | `problems`: only if the exit code is not 0, `always`: on every run | `problems` |
+| `MAIL_TRANSPORT` | `sendmail` (local MTA), `smtp` (directly via `curl`), `print` (output only) | `sendmail` |
+| `MAIL_HTML_INLINE` | `1`: HTML as mail body, `0`: attachment only | `1` |
+| `MAIL_SUBJECT_PREFIX` | subject prefix | `[aptfleet]` |
+| `SENDMAIL` | sendmail binary | `/usr/sbin/sendmail` |
+| `SMTP_URL` | e.g. `smtps://mail.example.com:465` or `smtp://mail.example.com:587` | – |
+| `SMTP_STARTTLS` | `1`: require STARTTLS (for port 587) | `0` |
+| `SMTP_USER`, `SMTP_PASSWORD` | SMTP login (never passed on the command line) | – |
+| `REPORT_NAME` | host name in subject and file name | `hostname` |
+| `REPORT_DIR` | also archive the HTML reports here | – |
+| `REPORT_KEEP_DAYS` | delete older reports in `REPORT_DIR` | `30` |
+| `APTFLEET`, `PYTHON` | path to `aptfleet.py` and the interpreter | `../aptfleet.py`, `python3` |
 
-`MAIL_TRANSPORT=smtp` braucht `curl`, aber keinen MTA auf dem Server. Der Wrapper geht
-auch ohne `--local`, also für den zentralen Betrieb per SSH (`APTFLEET_ARGS` mit
-`--inventory` …).
+`MAIL_TRANSPORT=smtp` needs `curl` but no MTA on the server. The wrapper also works
+without `--local`, for a central check over SSH (`APTFLEET_ARGS` with `--inventory` …).
 
-Exit-Code des Wrappers: der von `aptfleet.py`, `4` wenn der Mailversand scheitert,
-`5` bei Konfigurationsfehlern. Fehlermeldungen gehen auf stderr, also per cron-Mail an
-`MAILTO`.
+Exit code of the wrapper: the one from aptfleet, `4` if sending the mail fails, `5` for
+configuration errors. Error messages go to stderr, so cron mails them to `MAILTO`.
 
-### Einrichtung
+### Setup
 
-Mit dem [.deb-Paket](#als-deb-paket) liegen Wrapper, env-Datei und Cronjob schon an Ort
-und Stelle:
+With the [.deb package](#deb-package), the wrapper, env file and cron job are already in
+place:
 
 ```bash
-sudoedit /etc/aptfleet/mail.env                 # MAIL_TO, Versandweg …
-sudo aptfleet-mail --dry-run | less             # Testlauf, verschickt nichts
-sudoedit /etc/cron.d/aptfleet              # Cron-Zeile einkommentieren
+sudoedit /etc/aptfleet/mail.env           # MAIL_TO, transport …
+sudo aptfleet-mail --dry-run | less       # test run, sends nothing
+sudoedit /etc/cron.d/aptfleet             # uncomment the cron line
 ```
 
-Ohne Paket:
+From a checkout:
 
 ```bash
-sudo cp -r updates_report /opt/
-sudo cp /opt/aptfleet/cron/mail.env.sample /etc/aptfleet/mail.env
-sudo chmod 600 /etc/aptfleet/mail.env
-sudoedit /etc/aptfleet/mail.env                 # MAIL_TO, Versandweg …
+sudo git clone https://github.com/ironpinguin/aptfleet.git /opt/aptfleet
+sudo install -d /etc/aptfleet
+sudo install -m 600 /opt/aptfleet/cron/mail.env.sample /etc/aptfleet/mail.env
+sudoedit /etc/aptfleet/mail.env           # MAIL_TO, transport …
 
-# Testlauf: Mail immer erzeugen und nur ausgeben statt verschicken
+# test run: always build the mail and print it instead of sending it
 sudo /opt/aptfleet/cron/aptfleet-mail.sh --dry-run /etc/aptfleet/mail.env | less
 
 sudo cp /opt/aptfleet/cron/aptfleet.cron /etc/cron.d/aptfleet
 ```
 
-`cron/aptfleet.cron` startet den Wrapper täglich um 06:30 als root. Aufruf:
-`aptfleet-mail.sh [--dry-run] [ENV-DATEI]`, ohne Angabe gilt `/etc/aptfleet/mail.env`.
+`cron/aptfleet.cron` runs the wrapper daily at 06:30 as root. Usage:
+`aptfleet-mail.sh [--dry-run] [ENV_FILE]`, default `/etc/aptfleet/mail.env`.
 
-## Datenquellen und Cache
+## Data sources and cache
 
-| Quelle | Wofür | Cache | gültig |
+| Source | Used for | Cache | Valid for |
 |---|---|---|---|
-| `ubuntu.com/security/cves/<id>.json` | Priorität/Beschreibung einzelner CVEs | `~/.cache/aptfleet/cves.json` | 7 Tage |
-| CISA KEV-Feed (JSON) | aktiv ausgenutzte CVEs | `~/.cache/aptfleet/kev.json` | 24 h |
-| Ubuntu-OVAL (`security-metadata.canonical.com`) | offene Lücken je Release | `~/.cache/aptfleet/oval-<codename>.json` | 24 h |
+| `ubuntu.com/security/cves/<id>.json` | priority/description of single CVEs | `~/.cache/aptfleet/cves.json` | 7 days |
+| CISA KEV feed (JSON) | actively exploited CVEs | `~/.cache/aptfleet/kev.json` | 24 h |
+| Ubuntu OVAL (`security-metadata.canonical.com`) | open vulnerabilities per release | `~/.cache/aptfleet/oval-<codename>.json` | 24 h |
 
-Ist eine Quelle nicht erreichbar, wird ein vorhandener älterer Cache genutzt. Der Report
-gibt dann einen Hinweis mit dem Datenstand aus. Ohne jeden Cache fehlt der jeweilige
-Teil, und der Exit-Code ist 3. Cache leeren: `rm -rf ~/.cache/aptfleet`.
+If a source is unreachable, an older cache is used and the report notes how old the data
+is. Without any cache, that part is missing and the exit code is 3. To clear the cache:
+`rm -rf ~/.cache/aptfleet`.
 
-## Tests
+## Similar projects
 
-Die Tests laufen ohne echte Hosts und ohne Netz:
+- [kevward](https://github.com/ForexRobotics/kevward): per-host HTML report of patch
+  posture, KEV exposure and attacker IPs (AGPL). Runs on each host.
+- [apt-watch](https://github.com/StuMP90/apt-watch): watches a Debian/Ubuntu host for CVEs
+  and pending updates, raises severity for KEV.
+
+aptfleet focuses on checking a whole fleet from one place over SSH, without installing
+anything on the hosts.
+
+## Development
+
+The tests need no real hosts and no network:
 
 ```bash
-cd updates_report
-python3 -m unittest discover -s tests -t .
+make test        # python3 -m unittest discover -s tests -t .
 ```
 
-## Aufbau
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the quality bar and the release process.
 
-| Modul | Aufgabe |
+| Module | Purpose |
 |---|---|
-| `aptfleet.py` | CLI, Inventory, Ablaufsteuerung, Exit-Code |
-| `remote.py` | SSH- bzw. lokaler Aufruf und Remote-Skript (Abschnitte `===SECTION …===`) |
-| `progress.py` | Fortschrittsanzeige auf stderr (nur im Terminal) |
-| `parsing.py` | Remote-Ausgabe in `HostReport`s zerlegen |
-| `debversion.py` | Vergleich von Debian-Versionsnummern |
-| `cve_info.py` | Ubuntu-CVE-API mit Cache |
-| `kev.py` | CISA-KEV-Katalog mit Cache |
-| `oval.py` | Ubuntu-OVAL-Feed laden und parsen |
-| `vulns.py` | offene Lücken aus installierten Paketen und OVAL ermitteln |
-| `render.py` | Textausgabe und gemeinsame Aufbereitung (Sortierung, Übersicht, Zusammenfassung) |
-| `render_html.py` | HTML-Report (`--html`) |
-| `cron/aptfleet-mail.sh` | Cron-Wrapper: Report erzeugen und per Mail verschicken |
-| `packaging/`, `Makefile` | .deb-Paket (nfpm-Konfiguration, Shims, Cronjob, Maintainer-Skripte) |
+| `aptfleet.py` | CLI, inventory, control flow, exit code |
+| `remote.py` | SSH or local call and the remote script (sections `===SECTION …===`) |
+| `progress.py` | progress output on stderr (terminal only) |
+| `parsing.py` | parse the remote output into `HostReport`s |
+| `debversion.py` | Debian version comparison |
+| `cve_info.py` | Ubuntu CVE API with cache |
+| `kev.py` | CISA KEV catalog with cache |
+| `oval.py` | load and parse the Ubuntu OVAL feed |
+| `vulns.py` | find open vulnerabilities from installed packages and OVAL |
+| `render.py` | text output and shared preparation (sorting, overview, summary) |
+| `render_html.py` | HTML report (`--html`) |
+| `cron/aptfleet-mail.sh` | cron wrapper: build the report and mail it |
+| `packaging/`, `Makefile` | .deb package (nfpm config, shims, cron job, maintainer scripts) |
+
+## License
+
+[Apache License 2.0](LICENSE). Copyright 2026 Michele Catalano.
