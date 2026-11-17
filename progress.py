@@ -1,4 +1,4 @@
-"""Fortschrittsanzeige auf stderr für interaktive Läufe (ohne TTY, z. B. cron, stumm)."""
+"""Progress output on stderr for interactive runs (silent without a TTY, e.g. under cron)."""
 from __future__ import annotations
 
 import shutil
@@ -8,10 +8,10 @@ import time
 
 
 class Progress:
-    """Feste Zeilen für Schritte und Host-Ergebnisse, dazu eine Statuszeile, die laufend
-    überschrieben wird und zeigt, was auf den gerade laufenden Hosts passiert.
+    """Fixed lines for steps and host results, plus a status line that is continuously
+    overwritten and shows what is happening on the hosts currently running.
 
-    Thread-sicher: Host-Ereignisse kommen aus den SSH-Worker-Threads."""
+    Thread-safe: host events come from the SSH worker threads."""
 
     def __init__(self, stream=None, enabled: bool | None = None, clock=time.monotonic):
         self.stream = stream or sys.stderr
@@ -34,7 +34,7 @@ class Progress:
     def hosts_start(self, total: int) -> None:
         with self._lock:
             self._total, self._done = total, 0
-            self._line(f"» {total} Host(s) prüfen …")
+            self._line(f"» Checking {total} host(s) …")
 
     def host_phase(self, host: str, phase: str) -> None:
         with self._lock:
@@ -53,7 +53,7 @@ class Progress:
             if error:
                 self._line(f"  ✗ {count} {host}: {error}{took}")
             else:
-                self._line(f"  ✓ {count} {host} fertig{took}")
+                self._line(f"  ✓ {count} {host} done{took}")
 
     def close(self) -> None:
         with self._lock:

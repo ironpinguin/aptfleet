@@ -85,7 +85,7 @@ class KevTest(unittest.TestCase):
         self.assertIn("CVE-2024-6387", kev.entries)
 
     def test_corrupt_cache_is_ignored(self):
-        self.cache.write_text("{kaputt")
+        self.cache.write_text("{broken")
         kev = load_kev(self.cache, fetch=lambda: self.sample, now=0.0)
         self.assertFalse(kev.stale)
 

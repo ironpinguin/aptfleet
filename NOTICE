@@ -1,0 +1,17 @@
+aptfleet
+Copyright 2026 Michele Catalano
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Data sources
+------------
+
+aptfleet does not ship vulnerability data. At run time it downloads:
+
+- Ubuntu CVE records (https://ubuntu.com/security/cves) and Ubuntu OVAL data
+  (https://security-metadata.canonical.com/oval/) published by Canonical.
+- The CISA Known Exploited Vulnerabilities catalog
+  (https://www.cisa.gov/known-exploited-vulnerabilities-catalog).
+
+The files in tests/fixtures/ contain small excerpts of these feeds and of
+Ubuntu package changelogs, used only as test input.

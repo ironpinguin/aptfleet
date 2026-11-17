@@ -1,4 +1,4 @@
-"""Parsing der Remote-Ausgabe (reine Funktionen, kein I/O)."""
+"""Parsing of the remote output (pure functions, no I/O)."""
 from __future__ import annotations
 
 import datetime
@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 SECTION_RE = re.compile(r"^===SECTION (?P<name>.+)===$")
 END_MARKER = "===END==="
-# Die Klammer ist locale-unabhängig gehalten ("upgradable from:" / "aktualisierbar von:").
+# The bracket part is matched locale-independently ("upgradable from:" / "aktualisierbar von:").
 UPGRADABLE_RE = re.compile(
     r"^(?P<package>[^/\s]+)/(?P<pockets>\S+)\s+(?P<new>\S+)\s+(?P<arch>\S+)"
     r"\s+\[[^:\]]*:\s*(?P<old>[^\]\s]+)\]"
@@ -33,7 +33,7 @@ class Upgrade:
 
 
 def split_sections(raw: str) -> dict[str, str]:
-    """Teilt die Remote-Ausgabe an den ===SECTION <name>=== Markern auf."""
+    """Splits the remote output at the ===SECTION <name>=== markers."""
     sections: dict[str, str] = {}
     current: str | None = None
     lines: list[str] = []
@@ -87,7 +87,7 @@ def parse_sources(text: str) -> dict[str, str]:
 
 
 def parse_source_versions(text: str) -> dict[str, str]:
-    """Binärpaket → installierte Quellversion (dritte Spalte, falls vorhanden)."""
+    """Binary package → installed source version (third column, if present)."""
     return {parts[0]: parts[2] for parts in map(str.split, text.splitlines()) if len(parts) > 2}
 
 
@@ -118,7 +118,7 @@ class InstalledPackage:
 @dataclass
 class OpenVuln:
     source: str
-    binaries: list[str]  # Anzeige-Binärpaket = binaries[0]
+    binaries: list[str]  # displayed binary package = binaries[0]
     installed_version: str
     cve_id: str
     priority: str | None
@@ -138,13 +138,13 @@ class HostReport:
     codename: str | None = None
     installed: list[InstalledPackage] = field(default_factory=list)
     ubuntu_origin: set[tuple[str, str]] = field(default_factory=set)
-    # Namen, die in Ubuntu- und in keiner Fremd-Paketliste stehen (gelten für jede Version).
+    # Names listed in an Ubuntu package list and in no third-party one (valid for any version).
     ubuntu_names: set[str] = field(default_factory=set)
     kernel_release: str | None = None
     open_vulns: list[OpenVuln] = field(default_factory=list)
     vuln_check_problem: str | None = None
-    lists_updated: int | None = None  # Epoche (Host-Uhr) der letzten Paketlisten-Aktualisierung
-    lists_age: int | None = None  # Sekunden seit lists_updated
+    lists_updated: int | None = None  # epoch (host clock) of the last package list update
+    lists_age: int | None = None  # seconds since lists_updated
 
     def is_ubuntu_package(self, pkg: InstalledPackage) -> bool:
         return (pkg.binary, pkg.version) in self.ubuntu_origin or pkg.binary in self.ubuntu_names
@@ -153,8 +153,8 @@ class HostReport:
 def running_kernel_image(
     installed: list[InstalledPackage], release: str | None
 ) -> InstalledPackage | None:
-    """Image-Paket des laufenden Kernels; ohne Herkunftsprüfung, da Ubuntu alte
-    Kernel-ABI-Pakete aus den Indizes entfernt."""
+    """Image package of the running kernel; no origin check, since Ubuntu removes old
+    kernel ABI packages from the indexes."""
     if not release:
         return None
     for binary in (f"linux-image-{release}", f"linux-image-unsigned-{release}"):
@@ -165,7 +165,7 @@ def running_kernel_image(
 
 
 def parse_installed(text: str) -> list[InstalledPackage]:
-    """Zeilen `<status> <binary> <version> [<source> <source_version>]`; nur Status `ii`."""
+    """Lines `<status> <binary> <version> [<source> <source_version>]`; status `ii` only."""
     result: list[InstalledPackage] = []
     seen: set[tuple[str, str]] = set()
     for line in text.splitlines():
@@ -183,7 +183,7 @@ def parse_installed(text: str) -> list[InstalledPackage]:
 
 
 def parse_origins(text: str) -> tuple[set[tuple[str, str]], set[str]]:
-    """`<name> <version>` → exaktes Paar; `<name> *` → Name gilt für jede Version."""
+    """`<name> <version>` → exact pair; `<name> *` → name is valid for any version."""
     origins: set[tuple[str, str]] = set()
     names: set[str] = set()
     for line in text.splitlines():
@@ -205,7 +205,7 @@ def parse_os(text: str) -> tuple[str | None, str | None]:
 
 
 def parse_lists_age(text: str) -> tuple[int | None, int | None]:
-    """Neuester Zeitstempel der Paketlisten und dessen Alter in Sekunden (Host-Uhr)."""
+    """Newest package list timestamp and its age in seconds (host clock)."""
     now: int | None = None
     stamps: list[int] = []
     for line in text.splitlines():
@@ -224,17 +224,17 @@ def parse_lists_age(text: str) -> tuple[int | None, int | None]:
 
 def format_age(seconds: int) -> str:
     if seconds < 3600:
-        return f"vor {seconds // 60} Min."
+        return f"{seconds // 60} min ago"
     if seconds < 48 * 3600:
-        return f"vor {seconds // 3600} Std."
-    return f"vor {seconds // 86400} Tagen"
+        return f"{seconds // 3600} h ago"
+    return f"{seconds // 86400} days ago"
 
 
 def _lists_state(report: HostReport) -> str:
     if report.lists_updated is None or report.lists_age is None:
-        return "Stand unbekannt"
+        return "last updated unknown"
     when = datetime.datetime.fromtimestamp(report.lists_updated).strftime("%Y-%m-%d %H:%M")
-    return f"Stand {when} ({format_age(report.lists_age)})"
+    return f"last updated {when} ({format_age(report.lists_age)})"
 
 
 def parse_changelog(text: str) -> list[ChangelogEntry]:
@@ -258,7 +258,7 @@ def parse_changelog(text: str) -> list[ChangelogEntry]:
 def new_changelog_entries(
     changelog: str, installed_version: str
 ) -> tuple[list[ChangelogEntry], bool]:
-    """Einträge neuer als die installierte Version; zweiter Wert: Abgleich unsicher."""
+    """Entries newer than the installed version; second value: match uncertain."""
     entries = parse_changelog(changelog)
     for index, entry in enumerate(entries):
         if entry.version == installed_version:
@@ -282,16 +282,16 @@ def build_host_report(host: str, raw_output: str, error: str | None = None) -> H
     report.ubuntu_origin, report.ubuntu_names = parse_origins(sections.get("origins", ""))
     report.kernel_release = sections.get("kernel", "").strip() or None
     if not codename:
-        report.vuln_check_problem = "kein Ubuntu-Codename"
+        report.vuln_check_problem = "no Ubuntu codename"
     elif not report.installed:
-        report.vuln_check_problem = "keine Paketliste"
+        report.vuln_check_problem = "no package list"
     elif not report.ubuntu_origin and not report.ubuntu_names:
-        report.vuln_check_problem = "Paketherkunft nicht ermittelbar"
+        report.vuln_check_problem = "package origin could not be determined"
     elif report.kernel_release and not running_kernel_image(
         report.installed, report.kernel_release
     ):
         release = report.kernel_release
-        report.vuln_check_problem = f"Kernel-Prüfung nicht möglich: kein Paket für {release}"
+        report.vuln_check_problem = f"kernel check not possible: no package for {release}"
 
     report.lists_updated, report.lists_age = parse_lists_age(sections.get("lists_age", ""))
     apt_update = sections.get("apt_update")
@@ -300,14 +300,14 @@ def build_host_report(host: str, raw_output: str, error: str | None = None) -> H
         rc_line = lines[0] if lines else ""
         if rc_line == "rc=skipped":
             report.warnings.append(
-                f"Paketlisten nicht aktualisiert (--no-refresh), {_lists_state(report)}"
-                " – Updates und Security-Infos können veraltet sein"
+                f"Package lists not refreshed (--no-refresh), {_lists_state(report)}"
+                " – updates and security info may be outdated"
             )
         elif rc_line != "rc=0":
-            detail = next((line for line in lines[1:] if line.strip()), "keine Details")
+            detail = next((line for line in lines[1:] if line.strip()), "no details")
             report.warnings.append(
-                f"apt-get update fehlgeschlagen ({rc_line or 'rc=?'}): {detail}"
-                f" – nutze vorhandene Paketlisten, {_lists_state(report)}"
+                f"apt-get update failed ({rc_line or 'rc=?'}): {detail}"
+                f" – using existing package lists, {_lists_state(report)}"
             )
 
     if "timeout" in sections:
@@ -320,7 +320,7 @@ def build_host_report(host: str, raw_output: str, error: str | None = None) -> H
         source = sources.get(upgrade.package, upgrade.package)
         changelog = sections.get(f"changelog {source}", "")
         if changelog.strip():
-            # Changelog-Header tragen die Quellversion (z. B. grub2-signed 1.202 statt 1.202+2.12-…).
+            # Changelog headers carry the source version (e.g. grub2-signed 1.202 instead of 1.202+2.12-…).
             installed = source_versions.get(upgrade.package, upgrade.old_version)
             entries, uncertain = new_changelog_entries(changelog, installed)
             available = True

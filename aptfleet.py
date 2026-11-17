@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Listet anstehende deb-Updates auf Rootserver und KVMs inkl. Security-/CVE-Infos."""
+"""Lists pending deb updates on Ubuntu hosts, with security/CVE information."""
 from __future__ import annotations
 
 import argparse
@@ -26,7 +26,7 @@ DEFAULT_TIMEOUT = 120
 
 
 def default_path(user: Path, system: Path) -> Path:
-    """Datei aus der User-Config, sonst aus /etc/aptfleet."""
+    """File from the user config, otherwise from /etc/aptfleet."""
     return user if user.is_file() else system
 
 
@@ -35,8 +35,8 @@ SSH_CONFIG = default_path(USER_CONFIG_DIR / "ssh.conf", SYSTEM_CONFIG_DIR / "ssh
 
 
 def read_inventory(path: Path) -> list[str]:
-    """Hosts aus einem Ansible-INI-Inventory, ohne Duplikate in Reihenfolge des ersten
-    Auftretens; [x:vars] und [x:children] enthalten keine Hosts."""
+    """Hosts from an Ansible INI inventory, deduplicated in order of first
+    appearance; [x:vars] and [x:children] contain no hosts."""
     hosts: list[str] = []
     in_host_section = True
     for line in Path(path).read_text().splitlines():
@@ -57,12 +57,12 @@ def select_hosts(inventory: list[str], requested: list[str]) -> list[str]:
         return inventory
     unknown = [host for host in requested if host not in inventory]
     if unknown:
-        raise ValueError(f"Unbekannte Hosts (nicht im Inventory): {', '.join(unknown)}")
+        raise ValueError(f"Unknown hosts (not in inventory): {', '.join(unknown)}")
     return [host for host in inventory if host in requested]
 
 
 def resolve_ssh_config(explicit: Path | None, default: Path = SSH_CONFIG) -> Path | None:
-    """Ohne explizite Angabe ssh.conf aus der aptfleet-Config, falls vorhanden; sonst gilt ~/.ssh/config."""
+    """Without an explicit value, ssh.conf from the aptfleet config if present; otherwise ~/.ssh/config applies."""
     if explicit is not None:
         return explicit
     return default if default.is_file() else None
@@ -91,56 +91,56 @@ def _foreign_notice(report: HostReport) -> str | None:
     if not names:
         return None
     shown = ", ".join(names[:10]) + (", …" if len(names) > 10 else "")
-    return f"{report.host}: {len(names)} Pakete ohne Ubuntu-Herkunft nicht geprüft ({shown})"
+    return f"{report.host}: {len(names)} packages without Ubuntu origin not checked ({shown})"
 
 
 def _positive_days(value: str) -> int:
     try:
         days = int(value)
     except ValueError:
-        raise argparse.ArgumentTypeError(f"keine ganze Zahl: {value!r}") from None
+        raise argparse.ArgumentTypeError(f"not an integer: {value!r}") from None
     if days < 1:
-        raise argparse.ArgumentTypeError(f"muss mindestens 1 sein: {days}")
+        raise argparse.ArgumentTypeError(f"must be at least 1: {days}")
     return days
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Zeigt anstehende Updates auf Rootserver und KVMs inkl. Security-Infos.",
-        epilog="Exit-Codes: 0 = nichts zu tun, 1 = Security-Updates oder offene KEV-Lücke, "
-        "2 = mindestens ein Host nicht erreichbar, "
-        "3 = Prüfung unvollständig (Feed/Host-Daten fehlen).",
+        description="Shows pending updates on Ubuntu hosts, with security information.",
+        epilog="Exit codes: 0 = nothing to do, 1 = security updates or open KEV vulnerability, "
+        "2 = at least one host unreachable, "
+        "3 = check incomplete (feed/host data missing).",
     )
     parser.add_argument("--host", action="append", default=[], metavar="NAME",
-                        help="nur diesen Host prüfen (Name aus virtualhosts, mehrfach möglich; "
-                        "mit --user beliebiger Hostname/IP)")
+                        help="check only this host (name from the inventory, repeatable; "
+                        "with --user any hostname/IP)")
     parser.add_argument("--user", metavar="NAME",
-                        help="SSH-User für --host; nutzt die Hosts direkt ohne virtualhosts "
-                        "und ohne Repo-SSH-Config (es gilt ~/.ssh/config)")
-    parser.add_argument("--inventory", type=Path, metavar="PFAD",
-                        help=f"Inventory-Datei (Default {INVENTORY})")
-    parser.add_argument("--ssh-config", type=Path, metavar="PFAD",
-                        help=f"SSH-Config für ssh -F (Default {SSH_CONFIG}, falls vorhanden, "
-                        "sonst ~/.ssh/config; mit --user nur bei Angabe)")
+                        help="SSH user for --host; uses the hosts directly, without inventory "
+                        "and without the aptfleet SSH config (~/.ssh/config applies)")
+    parser.add_argument("--inventory", type=Path, metavar="PATH",
+                        help=f"inventory file (default {INVENTORY})")
+    parser.add_argument("--ssh-config", type=Path, metavar="PATH",
+                        help=f"SSH config for ssh -F (default {SSH_CONFIG} if present, "
+                        "otherwise ~/.ssh/config; with --user only if given)")
     parser.add_argument("--local", action="store_true",
-                        help="nur den eigenen Rechner prüfen, ohne SSH (z. B. per Cronjob auf "
-                        "dem Server); nicht kombinierbar mit --host/--user/--inventory/--ssh-config")
-    parser.add_argument("--security-only", action="store_true", help="nur Security-Updates anzeigen")
-    parser.add_argument("--details", action="store_true", help="neue Changelog-Einträge anzeigen")
+                        help="check only the local machine, without SSH (e.g. from a cron job on "
+                        "the server); cannot be combined with --host/--user/--inventory/--ssh-config")
+    parser.add_argument("--security-only", action="store_true", help="show security updates only")
+    parser.add_argument("--details", action="store_true", help="show new changelog entries")
     parser.add_argument("--package", action="append", default=[], metavar="NAME",
-                        help="nur dieses Paket (Binärpaketname, mehrfach möglich)")
-    parser.add_argument("--no-refresh", action="store_true", help="kein 'apt-get update' vorher")
-    parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, metavar="SEKUNDEN",
-                        help=f"Timeout pro Host (Default {DEFAULT_TIMEOUT})")
-    parser.add_argument("--verbose", action="store_true", help="nicht parsebare Zeilen anzeigen")
+                        help="only this package (binary package name, repeatable)")
+    parser.add_argument("--no-refresh", action="store_true", help="do not run 'apt-get update' first")
+    parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, metavar="SECONDS",
+                        help=f"timeout per host (default {DEFAULT_TIMEOUT})")
+    parser.add_argument("--verbose", action="store_true", help="show lines that could not be parsed")
     parser.add_argument("--kev-recent", nargs="?", const=7, type=_positive_days, default=None,
-                        metavar="TAGE",
-                        help="zuletzt auf CISA KEV aufgenommene CVEs anzeigen (Default ohne Wert: 7 Tage)")
-    parser.add_argument("--html", type=Path, metavar="PFAD",
-                        help="Report zusätzlich als HTML-Datei schreiben (eigenständig, druckbar)")
+                        metavar="DAYS",
+                        help="show CVEs recently added to CISA KEV (default without value: 7 days)")
+    parser.add_argument("--html", type=Path, metavar="PATH",
+                        help="also write the report as an HTML file (self-contained, printable)")
     parser.add_argument("--no-progress", action="store_true",
-                        help="keine Fortschrittsanzeige auf stderr (ohne Terminal, z. B. cron, "
-                        "ist sie ohnehin aus)")
+                        help="no progress output on stderr (already off without a terminal, "
+                        "e.g. under cron)")
     return parser.parse_args(argv)
 
 
@@ -174,24 +174,24 @@ def _run(args, inventory, run_all, lookup, kev_loader, oval_loader, today, stdou
                                             ("--inventory", args.inventory),
                                             ("--ssh-config", args.ssh_config)) if value]
         if conflicts:
-            print(f"Fehler: --local ist nicht kombinierbar mit {', '.join(conflicts)}",
+            print(f"Error: --local cannot be combined with {', '.join(conflicts)}",
                   file=sys.stderr)
             return 2
         hosts, ssh_config = [socket.gethostname()], None
     elif args.user:
         if not args.host:
-            print("Fehler: --user benötigt mindestens ein --host", file=sys.stderr)
+            print("Error: --user requires at least one --host", file=sys.stderr)
             return 2
         hosts, ssh_config = list(dict.fromkeys(args.host)), args.ssh_config
     else:
         try:
             hosts = select_hosts(read_inventory(args.inventory or inventory), args.host)
         except OSError as exc:
-            print(f"Fehler: Inventory nicht lesbar ({exc}); --inventory oder --host und --user angeben",
+            print(f"Error: inventory not readable ({exc}); pass --inventory, or --host and --user",
                   file=sys.stderr)
             return 2
         except ValueError as exc:
-            print(f"Fehler: {exc}", file=sys.stderr)
+            print(f"Error: {exc}", file=sys.stderr)
             return 2
         ssh_config = resolve_ssh_config(args.ssh_config)
 
@@ -205,38 +205,38 @@ def _run(args, inventory, run_all, lookup, kev_loader, oval_loader, today, stdou
     notices: list[str] = []
     incomplete = False
 
-    progress.step("KEV-Liste (CISA) laden")
+    progress.step("Loading KEV list (CISA)")
     kev_data = kev_loader()
     if kev_data is None:
-        notices.append("KEV-Liste nicht abrufbar (cisa.gov) – keine KEV-Markierung")
+        notices.append("KEV list unavailable (cisa.gov) – no KEV marking")
         incomplete = True
         kev_entries: dict = {}
     else:
         kev_entries = kev_data.entries
         if kev_data.stale:
-            notices.append(f"KEV-Stand vom {_format_date(kev_data.fetched_at)}")
+            notices.append(f"KEV data from {_format_date(kev_data.fetched_at)}")
     kev_ids = set(kev_entries)
 
     checkable = [r for r in reports if not r.error and not r.vuln_check_problem]
     oval_by_codename: dict = {}
     for codename in dict.fromkeys(r.codename for r in checkable):
-        progress.step(f"Ubuntu-Schwachstellendaten ({codename}) laden")
+        progress.step(f"Loading Ubuntu vulnerability data ({codename})")
         data = oval_loader(codename)
         oval_by_codename[codename] = data
         if data is None:
             notices.append(
-                f"Ubuntu-Schwachstellendaten ({codename}) nicht abrufbar"
-                " – Lücken-Prüfung für betroffene Hosts entfällt"
+                f"Ubuntu vulnerability data ({codename}) unavailable"
+                " – vulnerability check skipped for affected hosts"
             )
         elif data.stale:
             notices.append(
-                f"Ubuntu-Schwachstellendaten ({codename}) vom {_format_date(data.fetched_at)}"
+                f"Ubuntu vulnerability data ({codename}) from {_format_date(data.fetched_at)}"
             )
     for report in checkable:
         data = oval_by_codename[report.codename]
         if data is None:
             report.vuln_check_problem = (
-                f"Ubuntu-Schwachstellendaten ({report.codename}) nicht abrufbar"
+                f"Ubuntu vulnerability data ({report.codename}) unavailable"
             )
             continue
         vulns = find_open_vulns(report, data.cves, kev_ids)
@@ -248,7 +248,7 @@ def _run(args, inventory, run_all, lookup, kev_loader, oval_loader, today, stdou
     if args.details:
         cve_ids |= {v.cve_id for report in reports for v in report.open_vulns}
     if cve_ids:
-        progress.step(f"CVE-Infos abrufen ({len(cve_ids)} CVEs)")
+        progress.step(f"Fetching CVE info ({len(cve_ids)} CVEs)")
     cves, failed = lookup(cve_ids) if cve_ids else ({}, [])
 
     kev_recent = None
@@ -276,9 +276,9 @@ def _run(args, inventory, run_all, lookup, kev_loader, oval_loader, today, stdou
         try:
             args.html.write_text(html, encoding="utf-8")
         except OSError as exc:
-            print(f"Fehler: HTML-Report nicht schreibbar ({exc})", file=sys.stderr)
+            print(f"Error: HTML report not writable ({exc})", file=sys.stderr)
             return 2
-        print(f"HTML-Report geschrieben: {args.html}", file=stdout)
+        print(f"HTML report written: {args.html}", file=stdout)
     return exit_code(reports, incomplete)
 
 

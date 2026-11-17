@@ -1,15 +1,15 @@
-# Beispiel für /etc/cron.d/aptfleet
+# Example for /etc/cron.d/aptfleet
 #   cp cron/aptfleet.cron /etc/cron.d/aptfleet
-# Dateien in /etc/cron.d brauchen eine User-Spalte und dürfen keinen Punkt im Namen haben.
+# Files in /etc/cron.d need a user column and must not have a dot in their name.
 
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-# Ausgaben des Wrappers (nur Fehler, z. B. Mailversand fehlgeschlagen) gehen per cron-Mail hierhin
+# Wrapper output (errors only, e.g. mail delivery failed) is sent here by cron mail
 MAILTO=root
 
-# Täglich um 06:30 als root (apt-get update ohne sudo). Den Report verschickt der Wrapper selbst.
-# Der Exit-Code des Wrappers ist für cron egal, daher "|| true" nicht nötig.
+# Daily at 06:30 as root (apt-get update without sudo). The wrapper mails the report itself.
+# cron ignores the wrapper's exit code, so "|| true" is not needed.
 30 6 * * *  root  /opt/aptfleet/cron/aptfleet-mail.sh /etc/aptfleet/mail.env
 
-# Variante ohne root: eigener User, Paketlisten aus apt-daily (APTFLEET_ARGS mit --no-refresh)
+# Variant without root: dedicated user, package lists from apt-daily (APTFLEET_ARGS with --no-refresh)
 #30 6 * * *  updates  /opt/aptfleet/cron/aptfleet-mail.sh /home/updates/aptfleet-mail.env

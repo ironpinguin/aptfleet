@@ -28,7 +28,7 @@ from remote import HostResult
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SCRIPT = Path(__file__).resolve().parents[1] / "aptfleet.py"
-INVENTORY_TEXT = "[ubuntu]\nrootserver-ansible\n#vpn-ansible\n\nwebserver-ansible\npdf-ansible\n"
+INVENTORY_TEXT = "[ubuntu]\napp1\n#vpn1\n\nweb1\ndb1\n"
 
 
 def pkg(security: bool) -> PackageReport:
@@ -39,7 +39,7 @@ def pkg(security: bool) -> PackageReport:
 class InventoryTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.inventory = Path(self._tmp.name) / "virtualhosts"
+        self.inventory = Path(self._tmp.name) / "inventory.ini"
         self.inventory.write_text(INVENTORY_TEXT)
 
     def tearDown(self):
@@ -48,14 +48,14 @@ class InventoryTest(unittest.TestCase):
     def test_read_inventory_skips_comments_and_groups(self):
         self.assertEqual(
             read_inventory(self.inventory),
-            ["rootserver-ansible", "webserver-ansible", "pdf-ansible"],
+            ["app1", "web1", "db1"],
         )
 
     def test_read_inventory_skips_vars_and_children_sections(self):
         self.inventory.write_text(
-            "ansible_user=ansiadm\n"
-            "[ubuntu]\nhost-a\nhost-b  # Kommentar\n"
-            "[all:vars]\nansible_user=ansiadm\nansible_python_interpreter = /usr/bin/python3\n"
+            "ansible_user=admin\n"
+            "[ubuntu]\nhost-a\nhost-b  # comment\n"
+            "[all:vars]\nansible_user=admin\nansible_python_interpreter = /usr/bin/python3\n"
             "[db]\ndb-1 ansible_host=10.0.0.20\n"
             "[server:children]\nubuntu\ndb\n"
             "[ ubuntu:vars ]\nfoo=bar\n"
@@ -71,13 +71,13 @@ class InventoryTest(unittest.TestCase):
         inventory = read_inventory(self.inventory)
         self.assertEqual(select_hosts(inventory, []), inventory)
         self.assertEqual(
-            select_hosts(inventory, ["pdf-ansible", "rootserver-ansible"]),
-            ["rootserver-ansible", "pdf-ansible"],
+            select_hosts(inventory, ["db1", "app1"]),
+            ["app1", "db1"],
         )
 
     def test_select_unknown_host_raises(self):
-        with self.assertRaisesRegex(ValueError, "vpn-ansible"):
-            select_hosts(read_inventory(self.inventory), ["vpn-ansible"])
+        with self.assertRaisesRegex(ValueError, "vpn1"):
+            select_hosts(read_inventory(self.inventory), ["vpn1"])
 
 
 class ExitCodeTest(unittest.TestCase):
@@ -89,8 +89,8 @@ class ExitCodeTest(unittest.TestCase):
         )
 
     def test_codes_with_vulns_and_incomplete(self):
-        kev_vuln = OpenVuln("x", ["x"], "1", "CVE-1", "high", "kein Fix", True)
-        plain_vuln = OpenVuln("x", ["x"], "1", "CVE-2", "high", "kein Fix", False)
+        kev_vuln = OpenVuln("x", ["x"], "1", "CVE-1", "high", "no fix", True)
+        plain_vuln = OpenVuln("x", ["x"], "1", "CVE-2", "high", "no fix", False)
         self.assertEqual(exit_code([HostReport("a", open_vulns=[kev_vuln])]), 1)
         self.assertEqual(exit_code([HostReport("a", open_vulns=[plain_vuln])]), 0)
         self.assertEqual(exit_code([HostReport("a", packages=[pkg(True)])], incomplete=True), 3)
@@ -114,14 +114,14 @@ def default_kev() -> KevData:
 
 
 def default_oval() -> OvalData:
-    # libxml2 (installed, Ubuntu-Herkunft) ohne Fix; nicht in einem Changelog der Updates.
+    # libxml2 (installed, Ubuntu origin) without fix; not in any changelog of the updates.
     return OvalData({"CVE-2025-7000": OvalCve("CVE-2025-7000", "high", {"libxml2": None}, {})}, 0.0, False)
 
 
 class MainTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self.inventory = Path(self._tmp.name) / "virtualhosts"
+        self.inventory = Path(self._tmp.name) / "inventory.ini"
         self.inventory.write_text(INVENTORY_TEXT)
         self.run_calls = []
         self.lookup_calls = []
@@ -141,7 +141,7 @@ class MainTest(unittest.TestCase):
         self.users.append(user)
         raw = (FIXTURES / "remote_output.txt").read_text()
         return [
-            HostResult(h, False, "ssh timeout nach 120s", "") if h == "pdf-ansible" else HostResult(h, True, None, raw)
+            HostResult(h, False, "ssh timeout after 120s", "") if h == "db1" else HostResult(h, True, None, raw)
             for h in hosts
         ]
 
@@ -175,27 +175,27 @@ class MainTest(unittest.TestCase):
         code, out = self.run_main()
         self.assertEqual(code, 2)
         hosts, ssh_config, refresh, packages, timeout = self.run_calls[0]
-        self.assertEqual(hosts, ["rootserver-ansible", "webserver-ansible", "pdf-ansible"])
+        self.assertEqual(hosts, ["app1", "web1", "db1"])
         self.assertEqual(ssh_config, resolve_ssh_config(None))
         self.assertTrue(refresh)
         self.assertEqual(packages, [])
         self.assertEqual(timeout, 120)
         self.assertEqual(self.lookup_calls, [{"CVE-2025-9231", "CVE-2025-9232"}])
-        self.assertIn("━━ pdf-ansible — FEHLER: ssh timeout nach 120s ━━", out)
+        self.assertIn("━━ db1 — ERROR: ssh timeout after 120s ━━", out)
         self.assertIn("CVE-2025-9231, CVE-2025-9232 (high, KEV)", out)
-        self.assertIn("Hinweis: CVE-Prioritäten teilweise nicht abrufbar", out)
+        self.assertIn("Note: Some CVE priorities unavailable", out)
         self.assertNotIn("\033[", out)
 
     def test_options_are_passed_through(self):
         code, _ = self.run_main(
-            "--host", "webserver-ansible", "--no-refresh", "--package", "openssl", "--timeout", "30"
+            "--host", "web1", "--no-refresh", "--package", "openssl", "--timeout", "30"
         )
         self.assertEqual(code, 1)
         hosts, _, refresh, packages, timeout = self.run_calls[0]
-        self.assertEqual((hosts, refresh, packages, timeout), (["webserver-ansible"], False, ["openssl"], 30))
+        self.assertEqual((hosts, refresh, packages, timeout), (["web1"], False, ["openssl"], 30))
 
     def test_local_checks_own_host_without_inventory(self):
-        self.inventory = Path(self._tmp.name) / "gibtsnicht"
+        self.inventory = Path(self._tmp.name) / "doesnotexist"
         with mock.patch("aptfleet.socket.gethostname", return_value="myserver"):
             code, out = self.run_main("--local", "--no-refresh")
         self.assertEqual(code, 1)
@@ -211,7 +211,7 @@ class MainTest(unittest.TestCase):
             with self.subTest(extra=extra), mock.patch("sys.stderr", io.StringIO()) as err:
                 code, _ = self.run_main("--local", *extra)
                 self.assertEqual(code, 2)
-                self.assertIn("--local ist nicht kombinierbar", err.getvalue())
+                self.assertIn("--local cannot be combined", err.getvalue())
         self.assertEqual(self.run_calls, [])
 
     def test_ssh_modes_are_not_local(self):
@@ -219,12 +219,12 @@ class MainTest(unittest.TestCase):
         self.assertEqual(self.locals, [False])
 
     def test_unknown_host_returns_2_without_ssh(self):
-        code, _ = self.run_main("--host", "gibtsnicht")
+        code, _ = self.run_main("--host", "doesnotexist")
         self.assertEqual(code, 2)
         self.assertEqual(self.run_calls, [])
 
     def test_user_mode_uses_hosts_directly_without_inventory(self):
-        self.inventory = Path(self._tmp.name) / "gibtsnicht"
+        self.inventory = Path(self._tmp.name) / "doesnotexist"
         code, _ = self.run_main("--user", "admin", "--host", "10.0.0.5", "--host", "web.example.org")
         self.assertEqual(code, 1)
         hosts, ssh_config, *_ = self.run_calls[0]
@@ -238,19 +238,19 @@ class MainTest(unittest.TestCase):
         self.assertEqual(self.run_calls, [])
 
     def test_inventory_mode_passes_no_user(self):
-        self.run_main("--host", "webserver-ansible")
+        self.run_main("--host", "web1")
         self.assertEqual(self.users, [None])
 
     def test_inventory_option_overrides_default(self):
         other = Path(self._tmp.name) / "hosts.ini"
         other.write_text("[ubuntu]\nhost-a\nhost-b\n")
-        self.inventory = Path(self._tmp.name) / "gibtsnicht"
+        self.inventory = Path(self._tmp.name) / "doesnotexist"
         self.run_main("--inventory", str(other))
         hosts, *_ = self.run_calls[0]
         self.assertEqual(hosts, ["host-a", "host-b"])
 
     def test_ssh_config_option_is_passed(self):
-        self.run_main("--host", "webserver-ansible", "--ssh-config", "/etc/my_ssh.conf")
+        self.run_main("--host", "web1", "--ssh-config", "/etc/my_ssh.conf")
         _, ssh_config, *_ = self.run_calls[0]
         self.assertEqual(ssh_config, Path("/etc/my_ssh.conf"))
 
@@ -262,7 +262,7 @@ class MainTest(unittest.TestCase):
     def test_resolve_ssh_config(self):
         existing = Path(self._tmp.name) / "ssh.conf"
         existing.write_text("")
-        missing = Path(self._tmp.name) / "fehlt.conf"
+        missing = Path(self._tmp.name) / "missing.conf"
         self.assertEqual(resolve_ssh_config(None, existing), existing)
         self.assertIsNone(resolve_ssh_config(None, missing))
         self.assertEqual(resolve_ssh_config(missing, existing), missing)
@@ -270,9 +270,9 @@ class MainTest(unittest.TestCase):
     def test_default_path_prefers_user_then_system(self):
         base = Path(self._tmp.name) / "default_path"
         base.mkdir()
-        repo = base / "virtualhosts"
+        repo = base / "inventory.ini"
         etc = base / "hosts.ini"
-        # Keine Datei da: die /etc-Variante, damit Fehlermeldung/Hilfe dorthin zeigen
+        # No file present: the /etc variant, so error message/help point there
         self.assertEqual(default_path(repo, etc), etc)
         etc.write_text("")
         self.assertEqual(default_path(repo, etc), etc)
@@ -280,7 +280,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(default_path(repo, etc), repo)
 
     def test_missing_inventory_returns_2(self):
-        self.inventory = Path(self._tmp.name) / "gibtsnicht"
+        self.inventory = Path(self._tmp.name) / "doesnotexist"
         code, _ = self.run_main()
         self.assertEqual(code, 2)
         self.assertEqual(self.run_calls, [])
@@ -298,7 +298,7 @@ class MainTest(unittest.TestCase):
             oval_loader=lambda codename: default_oval(),
             stdout=io.StringIO(),
         )
-        # Host-Ausgabe ohne `installed`/Codename: Lücken-Prüfung unmöglich => unvollständig (3).
+        # Host output without `installed`/codename: vulnerability check impossible => incomplete (3).
         self.assertEqual(code, 3)
         self.assertEqual(self.lookup_calls, [])
 
@@ -316,10 +316,10 @@ class MainTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIs(self.progress_args[0], progress)
         log = err.getvalue()
-        self.assertIn("» 3 Host(s) prüfen", log)
-        self.assertIn("» KEV-Liste (CISA) laden", log)
-        self.assertIn("» Ubuntu-Schwachstellendaten (noble) laden", log)
-        self.assertIn("» CVE-Infos abrufen (", log)
+        self.assertIn("» Checking 3 host(s)", log)
+        self.assertIn("» Loading KEV list (CISA)", log)
+        self.assertIn("» Loading Ubuntu vulnerability data (noble)", log)
+        self.assertIn("» Fetching CVE info (", log)
         self.assertNotIn("»", out)
 
     def test_no_progress_flag_disables_progress(self):
@@ -327,39 +327,39 @@ class MainTest(unittest.TestCase):
         self.assertEqual(self.progress_args, [None])
 
     def test_full_run_marks_kev_and_lists_open_vulns(self):
-        code, out = self.run_main("--host", "webserver-ansible")
+        code, out = self.run_main("--host", "web1")
         self.assertEqual(code, 1)
         self.assertIn("(high, KEV)", out)
-        self.assertIn("Offene Lücken ohne Fix:", out)
+        self.assertIn("Open vulnerabilities (no fix available yet):", out)
 
     def test_kev_unavailable_gives_3(self):
-        code, out = self.run_main("--host", "webserver-ansible", kev=None)
+        code, out = self.run_main("--host", "web1", kev=None)
         self.assertEqual(code, 3)
-        self.assertIn("Hinweis: KEV-Liste nicht abrufbar", out)
+        self.assertIn("Note: KEV list unavailable", out)
 
     def test_stale_kev_notice_keeps_exit_code(self):
         stale = default_kev()
         stale.stale = True
         stale.fetched_at = datetime.datetime(2026, 11, 1, 12).timestamp()
-        code, out = self.run_main("--host", "webserver-ansible", kev=stale)
+        code, out = self.run_main("--host", "web1", kev=stale)
         self.assertEqual(code, 1)
-        self.assertIn("Hinweis: KEV-Stand vom 2026-11-01", out)
+        self.assertIn("Note: KEV data from 2026-11-01", out)
 
     def test_oval_unavailable_gives_3(self):
-        code, out = self.run_main("--host", "webserver-ansible", oval=None)
+        code, out = self.run_main("--host", "web1", oval=None)
         self.assertEqual(code, 3)
         self.assertIn(
-            "Lücken-Prüfung nicht möglich: Ubuntu-Schwachstellendaten (noble) nicht abrufbar", out
+            "Vulnerability check not possible: Ubuntu vulnerability data (noble) unavailable", out
         )
 
     def test_oval_unavailable_notice_once_per_codename(self):
-        code, out = self.run_main("--host", "rootserver-ansible", "--host", "webserver-ansible", oval=None)
+        code, out = self.run_main("--host", "app1", "--host", "web1", oval=None)
         self.assertEqual(code, 3)
         notice = (
-            "Ubuntu-Schwachstellendaten (noble) nicht abrufbar – Lücken-Prüfung für betroffene Hosts entfällt"
+            "Ubuntu vulnerability data (noble) unavailable – vulnerability check skipped for affected hosts"
         )
         self.assertEqual(out.count(notice), 1)
-        self.assertEqual(out.count("Lücken-Prüfung nicht möglich: Ubuntu-Schwachstellendaten (noble)"), 2)
+        self.assertEqual(out.count("Vulnerability check not possible: Ubuntu vulnerability data (noble)"), 2)
 
     def test_kev_recent_rejects_values_below_one(self):
         for bad in ("0", "-3"):
@@ -369,8 +369,8 @@ class MainTest(unittest.TestCase):
         self.assertEqual(self.run_calls, [])
 
     def test_kev_recent_one_day_heading(self):
-        _, out = self.run_main("--host", "webserver-ansible", "--kev-recent", "1")
-        self.assertIn("Neu auf CISA KEV (letzter Tag):", out)
+        _, out = self.run_main("--host", "web1", "--kev-recent", "1")
+        self.assertIn("New on CISA KEV (last day):", out)
 
     def test_verbose_skips_superseded_ubuntu_packages(self):
         raw = (FIXTURES / "remote_output.txt").read_text().replace(
@@ -378,57 +378,57 @@ class MainTest(unittest.TestCase):
         )
         self.assertIn("libc6 *", raw)
         self.fake_run_all = lambda hosts, *a, **k: [HostResult(h, True, None, raw) for h in hosts]
-        _, out = self.run_main("--host", "webserver-ansible", "--verbose")
-        self.assertIn("1 Pakete ohne Ubuntu-Herkunft nicht geprüft (docker-ce)", out)
+        _, out = self.run_main("--host", "web1", "--verbose")
+        self.assertIn("1 packages without Ubuntu origin not checked (docker-ce)", out)
 
     def test_oval_loaded_once_per_codename(self):
-        self.run_main()  # zwei erreichbare noble-Hosts
+        self.run_main()  # two reachable noble hosts
         self.assertEqual(self.oval_calls, ["noble"])
 
     def test_unreachable_host_not_passed_to_oval(self):
-        self.run_main("--host", "pdf-ansible")
+        self.run_main("--host", "db1")
         self.assertEqual(self.oval_calls, [])
 
     def test_kev_recent_flag(self):
-        _, out = self.run_main("--host", "webserver-ansible", "--kev-recent")
-        self.assertIn("Neu auf CISA KEV (letzte 7 Tage):", out)
-        _, out = self.run_main("--host", "webserver-ansible", "--kev-recent", "30")
-        self.assertIn("(letzte 30 Tage)", out)
-        _, out = self.run_main("--host", "webserver-ansible")
-        self.assertNotIn("Neu auf CISA KEV", out)
+        _, out = self.run_main("--host", "web1", "--kev-recent")
+        self.assertIn("New on CISA KEV (last 7 days):", out)
+        _, out = self.run_main("--host", "web1", "--kev-recent", "30")
+        self.assertIn("(last 30 days)", out)
+        _, out = self.run_main("--host", "web1")
+        self.assertNotIn("New on CISA KEV", out)
 
     def test_package_filter_limits_open_vulns(self):
-        _, out = self.run_main("--host", "webserver-ansible", "--package", "tzdata")
-        self.assertNotIn("Offene Lücken ohne Fix:", out)
+        _, out = self.run_main("--host", "web1", "--package", "tzdata")
+        self.assertNotIn("Open vulnerabilities (no fix available yet):", out)
 
     def test_verbose_lists_unchecked_foreign_packages(self):
-        _, out = self.run_main("--host", "webserver-ansible", "--verbose")
-        self.assertIn("1 Pakete ohne Ubuntu-Herkunft nicht geprüft (docker-ce)", out)
+        _, out = self.run_main("--host", "web1", "--verbose")
+        self.assertIn("1 packages without Ubuntu origin not checked (docker-ce)", out)
 
     def test_html_option_writes_file_and_keeps_terminal_output(self):
         target = Path(self._tmp.name) / "report.html"
-        code, out = self.run_main("--host", "webserver-ansible", "--html", str(target), "--details")
+        code, out = self.run_main("--host", "web1", "--html", str(target), "--details")
         self.assertEqual(code, 1)
-        self.assertIn("━━ webserver-ansible", out)
-        self.assertIn(f"HTML-Report geschrieben: {target}", out)
+        self.assertIn("━━ web1", out)
+        self.assertIn(f"HTML report written: {target}", out)
         html = target.read_text(encoding="utf-8")
         self.assertTrue(html.startswith("<!DOCTYPE html>"))
-        self.assertIn("webserver-ansible", html)
+        self.assertIn("web1", html)
         self.assertIn("<details", html)
         self.assertIn("KEV", html)
 
     def test_html_write_error_returns_2(self):
-        target = Path(self._tmp.name) / "fehlt" / "report.html"
+        target = Path(self._tmp.name) / "missing" / "report.html"
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
-            code, out = self.run_main("--host", "webserver-ansible", "--html", str(target))
+            code, out = self.run_main("--host", "web1", "--html", str(target))
         self.assertEqual(code, 2)
-        self.assertIn("━━ webserver-ansible", out)
-        self.assertIn("Fehler: HTML-Report nicht schreibbar", err.getvalue())
+        self.assertIn("━━ web1", out)
+        self.assertIn("Error: HTML report not writable", err.getvalue())
 
     def test_without_html_option_no_file_hint(self):
-        _, out = self.run_main("--host", "webserver-ansible")
-        self.assertNotIn("HTML-Report", out)
+        _, out = self.run_main("--host", "web1")
+        self.assertNotIn("HTML report", out)
 
 
 class CliSmokeTest(unittest.TestCase):
@@ -437,7 +437,7 @@ class CliSmokeTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("--security-only", proc.stdout)
         self.assertIn("--kev-recent", proc.stdout)
-        self.assertIn("3 = Prüfung unvollständig", " ".join(proc.stdout.split()))
+        self.assertIn("3 = check incomplete", " ".join(proc.stdout.split()))
 
 
 if __name__ == "__main__":

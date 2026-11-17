@@ -46,7 +46,7 @@ for arg in "$@"; do
 done
 """,
     "apt-get": """#!/bin/sh
-if [ "$1" = "update" ]; then echo "update aufgerufen"; exit 0; fi
+if [ "$1" = "update" ]; then echo "update called"; exit 0; fi
 if [ "$1" = "changelog" ]; then echo "changelog-of-$3 lang=$LC_ALL"; fi
 """,
     "sudo": """#!/bin/sh
@@ -82,7 +82,7 @@ def make_apt_lists(root: Path) -> None:
 
 
 class RemoteScriptTest(unittest.TestCase):
-    """Führt REMOTE_SCRIPT lokal mit gestubbten apt/dpkg-Befehlen aus."""
+    """Runs REMOTE_SCRIPT locally with stubbed apt/dpkg commands."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -209,7 +209,7 @@ class RemoteScriptTest(unittest.TestCase):
         self._stub("sudo", "echo SUDO-CALLED")
         out = self.run_script("1")
         self.assertNotIn("SUDO-CALLED", out)
-        self.assertIn("update aufgerufen", out)
+        self.assertIn("update called", out)
 
     def test_os_prints_codename(self):
         self.assertIn("VERSION_CODENAME", REMOTE_SCRIPT)
@@ -221,7 +221,7 @@ class RemoteScriptTest(unittest.TestCase):
         self.assertEqual(sections["origins"], "")
 
     def run_origins(self, installed: str) -> list[str]:
-        """Führt nur ORIGINS_SNIPPET aus; stdin = `<name> <version>`-Zeilen."""
+        """Runs only ORIGINS_SNIPPET; stdin = `<name> <version>` lines."""
         proc = subprocess.run(
             ["bash", "-c", ORIGINS_SNIPPET],
             input=installed,
@@ -234,7 +234,7 @@ class RemoteScriptTest(unittest.TestCase):
         return sorted(proc.stdout.splitlines())
 
     def add_superseded_lists(self) -> None:
-        """Ubuntu-Index nur mit neuerer Version; Name teils auch im Docker-Index."""
+        """Ubuntu index only with a newer version; some names also in the Docker index."""
         (self.lists_dir / "archive.ubuntu.com_ubuntu_dists_noble-updates_main_binary-amd64_Packages").write_text(
             PACKAGES_STANZA.format(p="libperl5.38t64", v="5.38.2-3.2ubuntu0.7")
             + PACKAGES_STANZA.format(p="containerd", v="1.7.28-0ubuntu1~24.04.1")
@@ -256,7 +256,7 @@ class RemoteScriptTest(unittest.TestCase):
 
     def test_origins_exact_match_suppresses_wildcard(self):
         self.add_superseded_lists()
-        # openssl 3.0.13-0ubuntu3.4 steht exakt in noble, 3.5 in noble-updates.
+        # openssl 3.0.13-0ubuntu3.4 is exactly in noble, 3.5 in noble-updates.
         self.assertEqual(self.run_origins("openssl 3.0.13-0ubuntu3.4\n"), ["openssl 3.0.13-0ubuntu3.4"])
 
     def test_origins_unknown_package_is_not_output(self):
@@ -292,17 +292,17 @@ def fake_runner(stdout="", stderr="", returncode=0, exc=None):
 
 class BuildSshCommandTest(unittest.TestCase):
     def test_command_with_quoted_args(self):
-        cmd = build_ssh_command("git-ansible", "/x/cfg", False, ["openssl", "evil pkg"])
+        cmd = build_ssh_command("mail1", "/x/cfg", False, ["openssl", "evil pkg"])
         self.assertEqual(
             cmd,
             [
                 "ssh", "-F", "/x/cfg", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15",
-                "git-ansible", "bash -s -- 0 openssl 'evil pkg'",
+                "mail1", "bash -s -- 0 openssl 'evil pkg'",
             ],
         )
 
     def test_refresh_flag(self):
-        cmd = build_ssh_command("git-ansible", "/x/cfg", True, [])
+        cmd = build_ssh_command("mail1", "/x/cfg", True, [])
         self.assertEqual(cmd[-1], "bash -s -- 1")
 
     def test_direct_host_with_user_and_without_config(self):
@@ -325,8 +325,8 @@ class BuildLocalCommandTest(unittest.TestCase):
 class RunHostTest(unittest.TestCase):
     def test_success(self):
         runner = fake_runner(stdout="===SECTION os===\n24.04\n===END===\n")
-        result = run_host("git-ansible", "/x/cfg", True, [], 30, runner=runner)
-        self.assertEqual(result, HostResult("git-ansible", True, None, "===SECTION os===\n24.04\n===END===\n"))
+        result = run_host("mail1", "/x/cfg", True, [], 30, runner=runner)
+        self.assertEqual(result, HostResult("mail1", True, None, "===SECTION os===\n24.04\n===END===\n"))
         _, kwargs = runner.calls[0]
         self.assertEqual(kwargs["input"], REMOTE_SCRIPT)
         self.assertEqual(kwargs["timeout"], 30)
@@ -336,18 +336,18 @@ class RunHostTest(unittest.TestCase):
             returncode=255,
             stderr="debug\nssh: connect to host pdf port 22: Connection refused\n",
         )
-        result = run_host("pdf-ansible", "/x/cfg", True, [], 30, runner=runner)
+        result = run_host("db1", "/x/cfg", True, [], 30, runner=runner)
         self.assertFalse(result.ok)
         self.assertEqual(result.error, "ssh: connect to host pdf port 22: Connection refused")
 
     def test_error_without_stderr(self):
-        result = run_host("pdf-ansible", "/x/cfg", True, [], 30, runner=fake_runner(returncode=1))
+        result = run_host("db1", "/x/cfg", True, [], 30, runner=fake_runner(returncode=1))
         self.assertEqual(result.error, "exit code 1")
 
     def test_timeout(self):
         runner = fake_runner(exc=subprocess.TimeoutExpired(cmd="ssh", timeout=30))
-        result = run_host("pdf-ansible", "/x/cfg", True, [], 30, runner=runner)
-        self.assertEqual(result.error, "ssh timeout nach 30s")
+        result = run_host("db1", "/x/cfg", True, [], 30, runner=runner)
+        self.assertEqual(result.error, "ssh timeout after 30s")
 
     def test_timeout_keeps_partial_output_once_package_list_is_complete(self):
         partial = (
@@ -357,33 +357,33 @@ class RunHostTest(unittest.TestCase):
             "===SECTION changelog tzdata===\n"
         )
         runner = fake_runner(exc=subprocess.TimeoutExpired(cmd="ssh", timeout=30, output=partial))
-        result = run_host("git-ansible", "/x/cfg", True, [], 30, runner=runner)
+        result = run_host("mail1", "/x/cfg", True, [], 30, runner=runner)
         self.assertTrue(result.ok)
         report = build_host_report(result.host, result.raw_output, result.error)
         self.assertEqual([p.upgrade.package for p in report.packages], ["tzdata"])
-        self.assertEqual(report.warnings, ["Timeout nach 30s – Changelogs unvollständig"])
+        self.assertEqual(report.warnings, ["Timeout after 30s – changelogs incomplete"])
 
     def test_timeout_before_package_list_is_an_error(self):
         runner = fake_runner(
             exc=subprocess.TimeoutExpired(cmd="ssh", timeout=30, output="===SECTION upgradable===\nfoo/x 1 all [u: 0]\n")
         )
-        result = run_host("git-ansible", "/x/cfg", True, [], 30, runner=runner)
+        result = run_host("mail1", "/x/cfg", True, [], 30, runner=runner)
         self.assertFalse(result.ok)
-        self.assertEqual(result.error, "ssh timeout nach 30s")
+        self.assertEqual(result.error, "ssh timeout after 30s")
 
     def test_non_utf8_output_does_not_crash(self):
         def runner(cmd, **kwargs):
             return subprocess.run(["printf", "caf\\351\\n===END===\\n"], **kwargs)
 
-        result = run_host("git-ansible", "/x/cfg", True, [], 30, runner=runner)
+        result = run_host("mail1", "/x/cfg", True, [], 30, runner=runner)
         self.assertTrue(result.ok)
         self.assertIn("caf\ufffd", result.raw_output)
 
     def test_incomplete_output(self):
         runner = fake_runner(stdout="===SECTION os===\n24.04\n")
-        result = run_host("pdf-ansible", "/x/cfg", True, [], 30, runner=runner)
+        result = run_host("db1", "/x/cfg", True, [], 30, runner=runner)
         self.assertFalse(result.ok)
-        self.assertEqual(result.error, "unvollständige Ausgabe (kein ===END===)")
+        self.assertEqual(result.error, "incomplete output (no ===END===)")
 
 
 class RunAllTest(unittest.TestCase):
@@ -391,13 +391,13 @@ class RunAllTest(unittest.TestCase):
         def runner(cmd, **kwargs):
             host = cmd[7]
             if host == "b":
-                raise OSError("ssh nicht gefunden")
+                raise OSError("ssh not found")
             return subprocess.CompletedProcess(cmd, 0, f"{host}\n===END===\n", "")
 
         results = run_all(["a", "b", "c"], "/x/cfg", True, [], 30, runner=runner)
         self.assertEqual([r.host for r in results], ["a", "b", "c"])
         self.assertEqual([r.ok for r in results], [True, False, True])
-        self.assertEqual(results[1].error, "ssh nicht ausführbar: ssh nicht gefunden")
+        self.assertEqual(results[1].error, "ssh not executable: ssh not found")
 
     def test_passes_user_to_ssh(self):
         calls = []
@@ -426,7 +426,7 @@ class RunAllTest(unittest.TestCase):
             raise subprocess.TimeoutExpired(cmd, 30)
 
         results = run_all(["myhost"], None, True, [], 30, runner=runner, local=True)
-        self.assertEqual(results[0].error, "bash timeout nach 30s")
+        self.assertEqual(results[0].error, "bash timeout after 30s")
 
 
 if __name__ == "__main__":
@@ -449,7 +449,7 @@ class PhaseTrackerTest(unittest.TestCase):
         ]:
             on_line(line + "\n")
         self.assertEqual(phases, [
-            "verbunden", "apt-get update", "Quellpakete zuordnen",
+            "connected", "apt-get update", "mapping source packages",
             "Changelog 1/2: openssl", "Changelog 2/2: tzdata",
         ])
 
@@ -492,8 +492,8 @@ class RunAllProgressTest(unittest.TestCase):
         results = run_all(["h1"], None, True, [], 30, runner=runner, progress=Recorder())
         self.assertTrue(results[0].ok)
         self.assertEqual(events, [
-            ("phase", "h1", "SSH-Verbindung"),
-            ("phase", "h1", "verbunden"),
+            ("phase", "h1", "SSH connection"),
+            ("phase", "h1", "connected"),
             ("phase", "h1", "apt-get update"),
             ("done", "h1", None),
         ])

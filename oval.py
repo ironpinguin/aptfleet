@@ -1,4 +1,4 @@
-"""Ubuntu-OVAL-Feed (CVE-Definitionen je Codename) laden, parsen und lokal cachen."""
+"""Load the Ubuntu OVAL feed (CVE definitions per codename), parse it and cache it locally."""
 from __future__ import annotations
 
 import bz2
@@ -21,7 +21,7 @@ FETCH_TIMEOUT = 120
 
 CODENAME_RE = re.compile(r"[a-z]+")
 CVE_RE = re.compile(r'<cve href="[^"]*" priority="([a-z]+)"[^>]*>(CVE-\d{4}-\d+)</cve>')
-# Archiv kann "noble", "esm-apps/noble" o. ä. sein, daher großzügige Zeichenklasse.
+# The archive can be "noble", "esm-apps/noble" or similar, hence the broad character class.
 PKG_RE = re.compile(
     r"comment=\"([a-z0-9.+-]+) source package in [a-z0-9/.+-]+, "
     r"(?:is affected and has been fixed \(note: '([^']*)'\)|might be affected and may need fixing)"
@@ -36,19 +36,19 @@ KERNEL_RUNNING_RE = re.compile(r"comment=\"Is kernel '([a-z0-9.+-]+)' running\?\
 class OvalCve:
     cve_id: str
     priority: str | None
-    packages: dict[str, str | None]  # Quellpaket -> Fix-Version, None = ungefixt
-    kernels: dict[str, str | None]  # Kernel-Quellpaket -> Fix-Version, None = ungefixt
+    packages: dict[str, str | None]  # source package -> fix version, None = not fixed
+    kernels: dict[str, str | None]  # kernel source package -> fix version, None = not fixed
 
 
 @dataclass
 class OvalData:
     cves: dict[str, OvalCve]
     fetched_at: float
-    stale: bool  # True: Abruf fehlgeschlagen, abgelaufener Cache verwendet
+    stale: bool  # True: fetch failed, expired cache used
 
 
 def _merge_package(packages: dict[str, str | None], name: str, fixed: str | None) -> None:
-    """Mehrere Archive (z. B. noble und esm-apps/noble) können dasselbe Paket nennen."""
+    """Several archives (e.g. noble and esm-apps/noble) can list the same package."""
     if name not in packages:
         packages[name] = fixed
         return
@@ -56,13 +56,13 @@ def _merge_package(packages: dict[str, str | None], name: str, fixed: str | None
     if old is None:
         packages[name] = fixed
     elif fixed is not None and "esm" in old and "esm" not in fixed:
-        packages[name] = fixed  # reguläres Archiv schlägt ESM
+        packages[name] = fixed  # regular archive wins over ESM
 
 
 def parse_oval(lines: Iterable[str]) -> dict[str, OvalCve]:
-    """Zeilenweiser Parser: <definition> startet, </definition> schließt.
+    """Line-based parser: <definition> opens, </definition> closes.
 
-    Definitionen ohne CVE-ID werden verworfen.
+    Definitions without a CVE ID are dropped.
     """
     cves: dict[str, OvalCve] = {}
     current: OvalCve | None = None
@@ -92,7 +92,7 @@ def parse_oval(lines: Iterable[str]) -> dict[str, OvalCve]:
             continue
         m = KERNEL_FIXED_RE.search(line)
         if m:
-            current.kernels[m.group(1)] = m.group(2)  # überschreibt immer None
+            current.kernels[m.group(1)] = m.group(2)  # always overrides None
             continue
         m = KERNEL_RUNNING_RE.search(line)
         if m:
@@ -107,19 +107,19 @@ def fetch_oval(codename: str) -> bytes:
 
 
 def _parse_blob(blob: bytes) -> dict[str, OvalCve]:
-    """Dekomprimiert streamend und parst; kaputte Daten oder 0 CVEs sind ein Fehler."""
+    """Decompresses as a stream and parses; broken data or 0 CVEs is an error."""
     try:
         with io.TextIOWrapper(bz2.BZ2File(io.BytesIO(blob)), encoding="utf-8") as text:
             cves = parse_oval(text)
     except (OSError, EOFError, ValueError) as exc:
-        raise ValueError(f"OVAL-Feed nicht lesbar: {exc}") from exc
+        raise ValueError(f"OVAL feed unreadable: {exc}") from exc
     if not cves:
-        raise ValueError("OVAL-Feed ohne CVE-Definitionen")
+        raise ValueError("OVAL feed has no CVE definitions")
     return cves
 
 
 def _load_cache(path: Path) -> OvalData | None:
-    """Liest den Cache; fehlende oder kaputte Dateien zählen als kein Cache."""
+    """Reads the cache; missing or broken files count as no cache."""
     try:
         raw = json.loads(path.read_text())
         fetched_at = float(raw["fetched_at"])
@@ -143,7 +143,7 @@ def _save_cache(path: Path, data: OvalData) -> None:
         tmp.write_text(json.dumps(payload, separators=(",", ":"), sort_keys=True))
         tmp.replace(path)
     except OSError:
-        pass  # Cache ist nur eine Optimierung; ohne ihn wird beim nächsten Lauf neu abgefragt.
+        pass  # The cache is only an optimisation; without it the next run fetches again.
 
 
 def load_oval(
@@ -152,8 +152,8 @@ def load_oval(
     fetch=fetch_oval,
     now: float | None = None,
 ) -> OvalData | None:
-    """Liefert die OVAL-Daten (Cache, 24 h TTL); None bei ungültigem Codename
-    oder wenn weder Abruf noch Cache möglich sind."""
+    """Returns the OVAL data (cache, 24 h TTL); None for an invalid codename
+    or if neither fetch nor cache is available."""
     if not CODENAME_RE.fullmatch(codename):
         return None
     now = time.time() if now is None else now

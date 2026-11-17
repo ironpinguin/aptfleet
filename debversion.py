@@ -1,9 +1,9 @@
-"""Debian-Versionsvergleich nach Debian Policy 5.6.12 (wie `dpkg --compare-versions`)."""
+"""Debian version comparison per Debian Policy 5.6.12 (like `dpkg --compare-versions`)."""
 from __future__ import annotations
 
 
 def _order(ch: str) -> int:
-    """Sortiergewicht eines Zeichens im nicht-numerischen Teil."""
+    """Sort weight of a character in the non-numeric part."""
     if ch == "~":
         return -1
     if ch.isascii() and ch.isalpha():
@@ -12,10 +12,10 @@ def _order(ch: str) -> int:
 
 
 def _compare_part(a: str, b: str) -> int:
-    """Vergleicht upstream- bzw. revision-Teil abwechselnd nicht-numerisch/numerisch."""
+    """Compares the upstream or revision part, alternating non-numeric/numeric."""
     i = j = 0
     while i < len(a) or j < len(b):
-        # Nicht-numerischer Präfix
+        # non-numeric prefix
         while (i < len(a) and not a[i].isdigit()) or (j < len(b) and not b[j].isdigit()):
             oa = _order(a[i]) if i < len(a) and not a[i].isdigit() else 0
             ob = _order(b[j]) if j < len(b) and not b[j].isdigit() else 0
@@ -25,7 +25,7 @@ def _compare_part(a: str, b: str) -> int:
                 i += 1
             if j < len(b) and not b[j].isdigit():
                 j += 1
-        # Numerischer Präfix (leer = 0)
+        # numeric prefix (empty = 0)
         si = i
         while i < len(a) and a[i].isdigit():
             i += 1
@@ -40,7 +40,7 @@ def _compare_part(a: str, b: str) -> int:
 
 
 def _split(version: str) -> tuple[int, str, str]:
-    """Zerlegt in (epoch, upstream, revision); Revision default "0"."""
+    """Splits into (epoch, upstream, revision); revision defaults to "0"."""
     epoch = 0
     if ":" in version:
         e, version = version.split(":", 1)
@@ -52,7 +52,7 @@ def _split(version: str) -> tuple[int, str, str]:
 
 
 def compare_versions(a: str, b: str) -> int:
-    """Gibt -1, 0 oder 1 zurück, wenn a kleiner, gleich oder größer als b ist."""
+    """Returns -1, 0 or 1 if a is less than, equal to or greater than b."""
     ea, ua, ra = _split(a)
     eb, ub, rb = _split(b)
     if ea != eb:

@@ -41,7 +41,7 @@ class FindOpenVulnsTest(unittest.TestCase):
     def test_unfixed_high_is_reported(self):
         r = host([pkg("imagemagick", "8:6.9-1", "imagemagick")])
         v = find_open_vulns(r, {"CVE-1": cve("CVE-1", "high", {"imagemagick": None})}, set())
-        self.assertEqual([(x.cve_id, x.status, x.kev) for x in v], [("CVE-1", "kein Fix", False)])
+        self.assertEqual([(x.cve_id, x.status, x.kev) for x in v], [("CVE-1", "no fix", False)])
 
     def test_medium_only_with_kev(self):
         oval = {"CVE-1": cve("CVE-1", "medium", {"openssh": None})}
@@ -82,7 +82,7 @@ class FindOpenVulnsTest(unittest.TestCase):
         )
         oval = {"CVE-1": cve("CVE-1", "high", {"openssh": "1:9.6p1-3"})}
         v = find_open_vulns(r, oval, set())
-        self.assertEqual(v[0].status, "Fix 1:9.6p1-3 nicht angeboten")
+        self.assertEqual(v[0].status, "fix 1:9.6p1-3 not offered")
 
     def test_update_of_other_source_does_not_cover(self):
         r = host(
@@ -98,19 +98,19 @@ class FindOpenVulnsTest(unittest.TestCase):
             upgrades=[upgrade("openssh-server", "openssh", new="99")],
         )
         oval = {"CVE-1": cve("CVE-1", "high", {"openssh": None})}
-        self.assertEqual(find_open_vulns(r, oval, set())[0].status, "kein Fix")
+        self.assertEqual(find_open_vulns(r, oval, set())[0].status, "no fix")
 
     def test_esm_only_fix(self):
         r = host([pkg("libxml2", "2.9.14+dfsg-1.3ubuntu3.1", "libxml2")])
         oval = {"CVE-1": cve("CVE-1", "critical", {"libxml2": "2.9.14+dfsg-1.3ubuntu3.1+esm1"})}
         v = find_open_vulns(r, oval, set())
-        self.assertEqual(v[0].status, "Fix nur via ESM/Pro (2.9.14+dfsg-1.3ubuntu3.1+esm1)")
+        self.assertEqual(v[0].status, "fix only via ESM/Pro (2.9.14+dfsg-1.3ubuntu3.1+esm1)")
 
     def test_fixed_but_not_offered(self):
         r = host([pkg("curl", "8.5.0-2ubuntu10.1", "curl")])
         oval = {"CVE-1": cve("CVE-1", "high", {"curl": "8.5.0-2ubuntu10.4"})}
         v = find_open_vulns(r, oval, set())
-        self.assertEqual(v[0].status, "Fix 8.5.0-2ubuntu10.4 nicht angeboten")
+        self.assertEqual(v[0].status, "fix 8.5.0-2ubuntu10.4 not offered")
 
     def test_third_party_package_is_ignored(self):
         r = host([pkg("containerd", "1.7-1", "containerd")])
@@ -155,7 +155,7 @@ class FindOpenVulnsTest(unittest.TestCase):
         v = find_open_vulns(r, oval, set())
         self.assertEqual(
             [(x.source, x.is_kernel, x.status) for x in v],
-            [("linux", True, "Fix 6.8.0-50.51 nicht angeboten")],
+            [("linux", True, "fix 6.8.0-50.51 not offered")],
         )
         self.assertEqual(v[0].binaries, ["linux-image-6.8.0-45-generic"])
         self.assertEqual(v[0].installed_version, "6.8.0-45.45")
@@ -172,7 +172,7 @@ class FindOpenVulnsTest(unittest.TestCase):
             "CVE-E": cve("CVE-E", "high", kernels={"linux": "6.8.0-99+esm1"}),
         }
         st = {x.cve_id: x.status for x in find_open_vulns(r, oval, set())}
-        self.assertEqual(st, {"CVE-U": "kein Fix", "CVE-E": "Fix nur via ESM/Pro (6.8.0-99+esm1)"})
+        self.assertEqual(st, {"CVE-U": "no fix", "CVE-E": "fix only via ESM/Pro (6.8.0-99+esm1)"})
 
     def test_kernel_not_covered_by_pending_update(self):
         r = host(
@@ -193,7 +193,7 @@ class FindOpenVulnsTest(unittest.TestCase):
         self.assertEqual((v[0].source, v[0].binaries), ("linux-hwe-6.8", ["linux-image-unsigned-6.8.0-45-generic"]))
 
     def test_kernel_image_without_ubuntu_origin_is_checked(self):
-        # Ubuntu entfernt alte Kernel-ABI-Pakete aus den Indizes; der laufende Kernel zählt trotzdem.
+        # Ubuntu removes old kernel ABI packages from the indexes; the running kernel still counts.
         r = host([pkg("linux-image-6.8.0-45-generic", "6.8.0-45.45", "linux-signed")], kernel="6.8.0-45-generic")
         r.ubuntu_origin = set()
         oval = {"CVE-K": cve("CVE-K", "high", kernels={"linux": None})}
@@ -201,13 +201,13 @@ class FindOpenVulnsTest(unittest.TestCase):
         self.assertEqual([(x.cve_id, x.is_kernel) for x in v], [("CVE-K", True)])
 
     def test_superseded_ubuntu_version_is_checked(self):
-        # Index kennt nur 0.7; installiert ist 0.6 ohne angebotenes Update.
+        # Index only knows 0.7; 0.6 is installed with no update offered.
         r = host([pkg("libperl5.38t64", "5.38.2-3.2ubuntu0.6", "perl")])
         r.ubuntu_origin = set()
         r.ubuntu_names = {"libperl5.38t64"}
         oval = {"CVE-P": cve("CVE-P", "high", {"perl": "5.38.2-3.2ubuntu0.7"})}
         v = find_open_vulns(r, oval, set())
-        self.assertEqual([x.status for x in v], ["Fix 5.38.2-3.2ubuntu0.7 nicht angeboten"])
+        self.assertEqual([x.status for x in v], ["fix 5.38.2-3.2ubuntu0.7 not offered"])
 
     def test_package_without_any_ubuntu_origin_is_skipped(self):
         r = host([pkg("docker-ce", "5:28.0.4-1", "docker-ce")])
@@ -250,7 +250,7 @@ class FindOpenVulnsTest(unittest.TestCase):
 
     def test_problem_skips_check(self):
         r = host([pkg("a", "1", "a")])
-        r.vuln_check_problem = "keine Paketliste"
+        r.vuln_check_problem = "no package list"
         self.assertEqual(find_open_vulns(r, {"CVE-1": cve("CVE-1", "high", {"a": None})}, set()), [])
 
 

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Führt aptfleet.py aus (z. B. per Cronjob) und verschickt das Ergebnis per Mail:
-# Text-Report als Mailtext, HTML-Report eingebettet und als Anhang.
+# Runs aptfleet.py (e.g. from a cron job) and mails the result:
+# text report as the mail body, HTML report inline and as an attachment.
 #
-# Aufruf: aptfleet-mail.sh [--dry-run] [ENV-DATEI]   (Default: /etc/aptfleet/mail.env)
-#   --dry-run  Mail immer erzeugen und auf stdout ausgeben statt verschicken
-# Konfiguration: siehe mail.env.sample
+# Usage: aptfleet-mail.sh [--dry-run] [ENV_FILE]   (default: /etc/aptfleet/mail.env)
+#   --dry-run  always build the mail and print it to stdout instead of sending it
+# Configuration: see mail.env.sample
 #
-# Exit-Code: der von aptfleet.py; 4, wenn der Mailversand fehlschlägt;
-# 5 bei Konfigurationsfehlern.
+# Exit code: that of aptfleet.py; 4 if mail delivery fails;
+# 5 on configuration errors.
 set -uo pipefail
 
 DRY_RUN=0
@@ -17,7 +17,7 @@ if [ "${1:-}" = --dry-run ]; then
 fi
 ENV_FILE="${1:-/etc/aptfleet/mail.env}"
 if [ ! -r "$ENV_FILE" ]; then
-  echo "aptfleet-mail: Konfiguration $ENV_FILE nicht lesbar" >&2
+  echo "aptfleet-mail: cannot read configuration $ENV_FILE" >&2
   exit 5
 fi
 # shellcheck source=/dev/null
@@ -30,7 +30,7 @@ APTFLEET_ARGS="${APTFLEET_ARGS:---local --details}"
 MAIL_TO="${MAIL_TO:-}"
 MAIL_WHEN="${MAIL_WHEN:-problems}"
 MAIL_TRANSPORT="${MAIL_TRANSPORT:-sendmail}"
-MAIL_SUBJECT_PREFIX="${MAIL_SUBJECT_PREFIX:-[updates]}"
+MAIL_SUBJECT_PREFIX="${MAIL_SUBJECT_PREFIX:-[aptfleet]}"
 MAIL_HTML_INLINE="${MAIL_HTML_INLINE:-1}"
 SENDMAIL="${SENDMAIL:-/usr/sbin/sendmail}"
 REPORT_DIR="${REPORT_DIR:-}"
@@ -46,15 +46,15 @@ fi
 
 die() { echo "aptfleet-mail: $*" >&2; exit 5; }
 
-[ -n "$MAIL_TO" ] || [ "$MAIL_TRANSPORT" = print ] || die "MAIL_TO ist nicht gesetzt ($ENV_FILE)"
-case "$MAIL_WHEN" in always|problems) ;; *) die "MAIL_WHEN muss always oder problems sein" ;; esac
-case "$MAIL_TRANSPORT" in sendmail|smtp|print) ;; *) die "MAIL_TRANSPORT muss sendmail, smtp oder print sein" ;; esac
+[ -n "$MAIL_TO" ] || [ "$MAIL_TRANSPORT" = print ] || die "MAIL_TO is not set ($ENV_FILE)"
+case "$MAIL_WHEN" in always|problems) ;; *) die "MAIL_WHEN must be always or problems" ;; esac
+case "$MAIL_TRANSPORT" in sendmail|smtp|print) ;; *) die "MAIL_TRANSPORT must be sendmail, smtp or print" ;; esac
 if [ "$MAIL_TRANSPORT" = smtp ]; then
-  [ -n "${SMTP_URL:-}" ] || die "MAIL_TRANSPORT=smtp braucht SMTP_URL"
-  command -v curl >/dev/null || die "MAIL_TRANSPORT=smtp braucht curl"
+  [ -n "${SMTP_URL:-}" ] || die "MAIL_TRANSPORT=smtp requires SMTP_URL"
+  command -v curl >/dev/null || die "MAIL_TRANSPORT=smtp requires curl"
 fi
 
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/aptfleet-mail.XXXXXX")" || die "mktemp fehlgeschlagen"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/aptfleet-mail.XXXXXX")" || die "mktemp failed"
 trap 'rm -rf "$WORK"' EXIT
 
 STAMP="$(date +%Y-%m-%d_%H%M)"
@@ -62,32 +62,32 @@ HTML_NAME="updates-${HOST}-${STAMP}.html"
 HTML_FILE="$WORK/$HTML_NAME"
 TEXT_FILE="$WORK/report.txt"
 
-# APTFLEET_ARGS wird an Leerzeichen getrennt (Pfade mit Leerzeichen gehen also nicht).
+# APTFLEET_ARGS is split on whitespace (so paths containing spaces do not work).
 read -r -a args <<< "$APTFLEET_ARGS"
 "$PYTHON" "$APTFLEET" ${args[@]+"${args[@]}"} --no-progress --html "$HTML_FILE" \
   >"$TEXT_FILE" 2>&1 </dev/null
 rc=$?
-# Den Hinweis auf die (gleich gelöschte) temporäre HTML-Datei nicht mitschicken.
-grep -vF "HTML-Report geschrieben: $HTML_FILE" "$TEXT_FILE" > "$TEXT_FILE.tmp"
+# Drop the note about the temporary HTML file (deleted right after) from the mail.
+grep -vF "HTML report written: $HTML_FILE" "$TEXT_FILE" > "$TEXT_FILE.tmp"
 mv "$TEXT_FILE.tmp" "$TEXT_FILE"
 
 case "$rc" in
-  0) status="keine dringenden Updates" ;;
-  1) status="Security-Updates oder offene KEV-Lücke" ;;
-  2) status="FEHLER: Host nicht erreichbar oder Aufruffehler" ;;
-  3) status="Prüfung unvollständig" ;;
-  *) status="FEHLER: aptfleet.py endete mit Code $rc" ;;
+  0) status="no urgent updates" ;;
+  1) status="security updates or open KEV vulnerability" ;;
+  2) status="ERROR: host unreachable or usage error" ;;
+  3) status="check incomplete" ;;
+  *) status="ERROR: aptfleet.py exited with code $rc" ;;
 esac
 
 if [ -n "$REPORT_DIR" ] && [ -f "$HTML_FILE" ]; then
   if mkdir -p "$REPORT_DIR" && cp "$HTML_FILE" "$REPORT_DIR/$HTML_NAME"; then
     find "$REPORT_DIR" -maxdepth 1 -name 'updates-*.html' -mtime "+$REPORT_KEEP_DAYS" -delete 2>/dev/null
   else
-    echo "aptfleet-mail: HTML-Report nicht in $REPORT_DIR ablegbar" >&2
+    echo "aptfleet-mail: cannot store HTML report in $REPORT_DIR" >&2
   fi
 fi
 
-# problems: Mail nur bei Handlungsbedarf oder Fehlern, also Exit-Code != 0.
+# problems: mail only when action is needed or on errors, i.e. exit code != 0.
 if [ "$MAIL_WHEN" = problems ] && [ "$rc" -eq 0 ]; then
   exit 0
 fi
@@ -132,7 +132,7 @@ MSG="$WORK/message.eml"
   printf -- '--%s--\n' "$BOUNDARY_MIXED"
 } > "$MSG"
 
-# Empfänger für die SMTP-Übergabe: durch Komma und/oder Leerzeichen getrennt.
+# Recipients for the SMTP envelope: separated by commas and/or spaces.
 read -r -a rcpts <<< "${MAIL_TO//,/ }"
 
 case "$MAIL_TRANSPORT" in
@@ -140,24 +140,24 @@ case "$MAIL_TRANSPORT" in
     cat "$MSG"
     ;;
   sendmail)
-    # shellcheck disable=SC2086  # SENDMAIL darf Optionen enthalten
+    # shellcheck disable=SC2086  # SENDMAIL may contain options
     $SENDMAIL -i -f "$MAIL_FROM" -- "${rcpts[@]}" < "$MSG" \
-      || { echo "aptfleet-mail: Versand per $SENDMAIL fehlgeschlagen" >&2; exit 4; }
+      || { echo "aptfleet-mail: sending mail via $SENDMAIL failed" >&2; exit 4; }
     ;;
   smtp)
     curl_args=(--silent --show-error --url "$SMTP_URL" --mail-from "$MAIL_FROM" --upload-file "$MSG")
     for r in "${rcpts[@]}"; do curl_args+=(--mail-rcpt "$r"); done
     [ "${SMTP_STARTTLS:-0}" = 1 ] && curl_args+=(--ssl-reqd)
-    # Zugangsdaten per stdin-Config statt Kommandozeile (sonst in `ps` sichtbar).
+    # Pass credentials via a config on stdin, not the command line (otherwise visible in `ps`).
     if [ -n "${SMTP_USER:-}" ]; then
       creds="$SMTP_USER:${SMTP_PASSWORD:-}"
       creds="${creds//\\/\\\\}"; creds="${creds//\"/\\\"}"
       printf 'user = "%s"\n' "$creds" \
         | curl "${curl_args[@]}" --config - \
-        || { echo "aptfleet-mail: SMTP-Versand an $SMTP_URL fehlgeschlagen" >&2; exit 4; }
+        || { echo "aptfleet-mail: sending mail via SMTP to $SMTP_URL failed" >&2; exit 4; }
     else
       curl "${curl_args[@]}" \
-        || { echo "aptfleet-mail: SMTP-Versand an $SMTP_URL fehlgeschlagen" >&2; exit 4; }
+        || { echo "aptfleet-mail: sending mail via SMTP to $SMTP_URL failed" >&2; exit 4; }
     fi
     ;;
 esac

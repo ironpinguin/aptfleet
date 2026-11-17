@@ -1,0 +1,13 @@
+# aptfleet has no third-party Python dependencies, so the only thing to keep
+# current are the GitHub Actions used in CI.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+    labels: [dependencies]

@@ -1,4 +1,4 @@
 #!/bin/sh
 set -e
-# Vom postinst erzeugte Bytecode-Dateien gehören nicht zum Paket.
+# Bytecode files created by postinst are not part of the package.
 rm -rf /usr/lib/aptfleet/__pycache__

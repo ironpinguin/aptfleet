@@ -1,8 +1,8 @@
-# make package               .deb nach dist/ bauen (Version: VERSION)
+# make package               build the .deb into dist/ (version: VERSION)
 # make package VERSION=1.2.0
-# make test                  Unit-Tests
+# make test                  unit tests
 #
-# Gebaut wird mit nfpm; ist es nicht installiert, läuft es per Docker.
+# Built with nfpm; if it is not installed, it runs via Docker.
 VERSION ?= 1.0.0
 export VERSION
 

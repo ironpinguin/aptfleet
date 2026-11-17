@@ -1,6 +1,6 @@
-# nfpm-Konfiguration für das .deb, gebaut mit `make package` (siehe Makefile).
-# Die Module bleiben flach in /usr/lib/aptfleet (privates Verzeichnis, kein
-# Python-Paket); /usr/bin enthält nur kleine Shims.
+# nfpm configuration for the .deb, built with `make package` (see Makefile).
+# The modules stay flat in /usr/lib/aptfleet (private directory, not a
+# Python package); /usr/bin only contains small shims.
 name: aptfleet
 arch: all
 platform: linux
@@ -8,12 +8,14 @@ version: ${VERSION}
 section: admin
 priority: optional
 maintainer: Michele Catalano <michele@catalano.de>
+homepage: https://github.com/ironpinguin/aptfleet
+license: Apache-2.0
 description: |
-  Report über anstehende Ubuntu-Updates mit CVE- und CISA-KEV-Infos
-  aptfleet prüft den eigenen Rechner (--local) oder Hosts per SSH auf
-  anstehende deb-Updates, behobene CVEs, aktiv ausgenutzte Lücken (KEV) und
-  offene Lücken ohne Fix. aptfleet-mail verschickt den Report per Mail,
-  z. B. täglich per Cronjob.
+  Report pending Ubuntu updates with CVE and CISA KEV info
+  aptfleet checks the local machine (--local) or hosts via SSH for pending
+  deb updates, fixed CVEs, actively exploited vulnerabilities (KEV) and open
+  vulnerabilities with no fix available yet. aptfleet-mail mails the report,
+  e.g. daily from a cron job.
 
 depends:
   - python3 (>= 3.9)
@@ -26,7 +28,7 @@ suggests:
   - default-mta | mail-transport-agent
 
 contents:
-  # Modi wie im Repo: aptfleet.py 0755, die übrigen Module 0644
+  # Modes as in the repo: aptfleet.py 0755, the other modules 0644
   - src: ./*.py
     dst: /usr/lib/aptfleet/
   - src: ./cron/aptfleet-mail.sh
@@ -60,6 +62,10 @@ contents:
 
   - src: ./README.md
     dst: /usr/share/doc/aptfleet/README.md
+    file_info:
+      mode: 0644
+  - src: ./LICENSE
+    dst: /usr/share/doc/aptfleet/LICENSE
     file_info:
       mode: 0644
 

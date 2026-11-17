@@ -1,4 +1,4 @@
-"""Aufbereitung der Host-Reports als eigenständige HTML-Datei (CSS inline, kein JavaScript)."""
+"""Formats the host reports as a self-contained HTML file (inline CSS, no JavaScript)."""
 from __future__ import annotations
 
 import datetime
@@ -14,6 +14,7 @@ from render import (
     open_vuln_rows,
     overview_rows,
     package_note,
+    plural,
     sorted_packages,
     summary_text,
 )
@@ -101,7 +102,7 @@ def _cve_cell(pkg: PackageReport, cves: dict[str, CveInfo], kev: dict[str, KevEn
     if note:
         text = f'<span class="note">{escape(note)}</span>'
     if pkg.changelog_uncertain:
-        text += ' <span class="note">[Abgleich unsicher]</span>'
+        text += ' <span class="note">[match uncertain]</span>'
     return text
 
 
@@ -112,17 +113,17 @@ def _cve_details(cve_id: str, cves: dict[str, CveInfo], kev: dict[str, KevEntry]
         out.append(f"<p><strong>{escape(cve_id)}:</strong> {escape(info.description)}</p>")
     entry = kev.get(cve_id)
     if entry:
-        out.append(f"<p>{_kev_badge()} KEV: {escape(entry.name)} (seit {escape(entry.date_added)})</p>")
+        out.append(f"<p>{_kev_badge()} KEV: {escape(entry.name)} (added {escape(entry.date_added)})</p>")
     return out
 
 
 def _package_details(pkg: PackageReport, cves: dict[str, CveInfo], kev: dict[str, KevEntry]) -> str:
     body: list[str] = []
     if not pkg.changelog_available:
-        body.append('<p class="note">Changelog nicht verfügbar</p>')
+        body.append('<p class="note">Changelog unavailable</p>')
     if pkg.changelog_uncertain:
-        body.append('<p class="note">(installierte Version nicht im Changelog gefunden – '
-                    'Auszug evtl. unvollständig)</p>')
+        body.append('<p class="note">(installed version not found in changelog – '
+                    'excerpt may be incomplete)</p>')
     for entry in pkg.entries:
         lines = "\n".join(changelog_lines(entry))
         body.append(f"<pre><strong>{escape(entry.version)}:</strong>\n{escape(lines)}</pre>")
@@ -139,7 +140,7 @@ def _packages_table(
     packages = sorted_packages(report, cves, kev, security_only)
     if not packages:
         return []
-    out = ["<h3>Updates</h3>", "<table><thead><tr><th></th><th>Paket</th><th>Version</th><th>CVEs</th>"
+    out = ["<h3>Updates</h3>", "<table><thead><tr><th></th><th>Package</th><th>Version</th><th>CVEs</th>"
            "</tr></thead><tbody>"]
     for pkg in packages:
         tag = '<span class="badge sec">SEC</span>' if pkg.upgrade.is_security else ""
@@ -166,7 +167,7 @@ def _open_vulns_table(
 ) -> list[str]:
     if not report.open_vulns:
         return []
-    out = ["<h3>Offene Lücken ohne Fix</h3>", "<table><thead><tr><th></th><th>Paket</th><th>Installiert</th>"
+    out = ["<h3>Open vulnerabilities (no fix available yet)</h3>", "<table><thead><tr><th></th><th>Package</th><th>Installed</th>"
            "<th>CVE</th><th>Status</th></tr></thead><tbody>"]
     for row in open_vuln_rows(report.open_vulns, details):
         tag = _kev_badge() if row.vuln.kev else ""
@@ -196,7 +197,7 @@ def _host_section(
     if report.error:
         return [
             f'<section class="error" id="{anchor}"><h2>{escape(report.host)} '
-            f'<span class="summary">— FEHLER: {escape(report.error)}</span></h2></section>'
+            f'<span class="summary">— ERROR: {escape(report.error)}</span></h2></section>'
         ]
     os_part = f" (Ubuntu {report.os_version})" if report.os_version else ""
     out = [
@@ -205,23 +206,23 @@ def _host_section(
     ]
     out.extend(f'<p class="warning">⚠ {escape(w)}</p>' for w in report.warnings)
     if report.vuln_check_problem:
-        out.append(f'<p class="warning">⚠ Lücken-Prüfung nicht möglich: {escape(report.vuln_check_problem)}</p>')
+        out.append(f'<p class="warning">⚠ Vulnerability check not possible: {escape(report.vuln_check_problem)}</p>')
     out.extend(_packages_table(report, cves, kev, details, security_only))
     out.extend(_open_vulns_table(report, cves, kev, details))
     if verbose:
-        out.extend(f'<p class="note">? nicht geparst: {escape(line)}</p>' for line in report.unparsed)
+        out.extend(f'<p class="note">? not parsed: {escape(line)}</p>' for line in report.unparsed)
     out.append("</div></section>")
     return out
 
 
 def _overview(reports: list[HostReport], kev: dict[str, KevEntry]) -> list[str]:
     out = ['<table class="overview"><thead><tr><th>Host</th><th>Ubuntu</th><th class="num">Updates</th>'
-           '<th class="num">Security</th><th class="num">KEV-Fix</th><th>Offene Lücken</th></tr></thead><tbody>']
+           '<th class="num">Security</th><th class="num">KEV fix</th><th>Open vulnerabilities</th></tr></thead><tbody>']
     for i, row in enumerate(overview_rows(reports, kev)):
         link = f'<a href="#host-{i}">{escape(row.host)}</a>'
         cls = ' class="attention"' if row.attention else ""
         if row.error:
-            out.append(f'<tr{cls}><td>{link}</td><td class="error" colspan="5">FEHLER: {escape(row.error)}</td></tr>')
+            out.append(f'<tr{cls}><td>{link}</td><td class="error" colspan="5">ERROR: {escape(row.error)}</td></tr>')
             continue
         out.append(
             f"<tr{cls}><td>{link}</td><td>{escape(row.os_version)}</td>"
@@ -233,13 +234,13 @@ def _overview(reports: list[HostReport], kev: dict[str, KevEntry]) -> list[str]:
 
 
 def _kev_recent(reports: list[HostReport], entries: list[KevEntry], days: int) -> list[str]:
-    period = "letzter Tag" if days == 1 else f"letzte {days} Tage"
-    out = [f"<section><h2>Neu auf CISA KEV ({period})</h2><div class=\"body\">"]
+    period = "last day" if days == 1 else f"last {days} days"
+    out = [f"<section><h2>New on CISA KEV ({period})</h2><div class=\"body\">"]
     if not entries:
-        out.append('<p class="note" style="margin: 8px 12px">(keine)</p>')
+        out.append('<p class="note" style="margin: 8px 12px">(none)</p>')
     else:
-        out.append("<table><thead><tr><th>Aufgenommen</th><th>CVE</th><th>Produkt</th><th>Name</th>"
-                   "<th>Betrifft</th></tr></thead><tbody>")
+        out.append("<table><thead><tr><th>Added</th><th>CVE</th><th>Product</th><th>Name</th>"
+                   "<th>Affects</th></tr></thead><tbody>")
         for e in sorted(entries, key=lambda e: e.date_added, reverse=True):
             hosts = ", ".join(kev_affected_hosts(reports, e.cve_id))
             out.append(
@@ -270,11 +271,11 @@ def render_html_report(
     stamp = generated.strftime("%Y-%m-%d %H:%M")
     out = [
         "<!DOCTYPE html>",
-        '<html lang="de"><head><meta charset="utf-8">',
+        '<html lang="en"><head><meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
-        f"<title>Update-Report {stamp}</title><style>{CSS}</style></head><body>",
-        "<h1>Update-Report</h1>",
-        f'<p class="meta">Erstellt {stamp} · {len(reports)} {"Host" if len(reports) == 1 else "Hosts"}</p>',
+        f"<title>Update report {stamp}</title><style>{CSS}</style></head><body>",
+        "<h1>Update report</h1>",
+        f'<p class="meta">Generated {stamp} · {plural(len(reports), "host")}</p>',
     ]
     out.extend(_overview(reports, kev))
     for i, report in enumerate(reports):
@@ -283,10 +284,10 @@ def render_html_report(
         out.extend(_kev_recent(reports, kev_recent, kev_recent_days))
     hints = []
     if cve_lookup_failed:
-        hints.append("CVE-Prioritäten teilweise nicht abrufbar (Ubuntu-Security-API nicht erreichbar).")
+        hints.append("Some CVE priorities unavailable (Ubuntu security API unreachable).")
     hints.extend(notices or [])
     if hints:
-        out.append('<ul class="notices">' + "".join(f"<li>Hinweis: {escape(h)}</li>" for h in hints) + "</ul>")
+        out.append('<ul class="notices">' + "".join(f"<li>Note: {escape(h)}</li>" for h in hints) + "</ul>")
     out.append(f'<p class="total">{escape(summary_text(reports, kev))}</p>')
     out.append("</body></html>")
     return "\n".join(out) + "\n"

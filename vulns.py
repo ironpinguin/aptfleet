@@ -19,10 +19,10 @@ def kernel_source_name(source: str) -> str:
 
 def _status_for_fix(fixed: str | None) -> str:
     if fixed is None:
-        return "kein Fix"
+        return "no fix"
     if "esm" in fixed:
-        return f"Fix nur via ESM/Pro ({fixed})"
-    return f"Fix {fixed} nicht angeboten"
+        return f"fix only via ESM/Pro ({fixed})"
+    return f"fix {fixed} not offered"
 
 
 def _is_relevant(cve: OvalCve, kev_ids: set[str]) -> bool:

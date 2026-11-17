@@ -1,4 +1,4 @@
-"""CVE-Priorität und -Beschreibung über die Ubuntu-Security-API, mit lokalem Cache."""
+"""CVE priority and description from the Ubuntu security API, with a local cache."""
 from __future__ import annotations
 
 import functools
@@ -52,7 +52,7 @@ def parse_cve_json(cve_id: str, data: dict) -> CveInfo:
 
 
 def build_ssl_context(fallback_cafile: Path = SYSTEM_CA_FILE, factory=ssl.create_default_context):
-    """Python von python.org bringt unter macOS keine CA-Zertifikate mit; dann System-CAs laden."""
+    """Python from python.org ships no CA certificates on macOS; load the system CAs then."""
     context = factory()
     if context.cert_store_stats()["x509_ca"] == 0 and fallback_cafile.exists():
         context.load_verify_locations(cafile=str(fallback_cafile))
@@ -85,7 +85,7 @@ def _save_cache(path: Path, cache: dict) -> None:
         tmp.write_text(json.dumps(cache, indent=1, sort_keys=True))
         tmp.replace(path)
     except OSError:
-        pass  # Cache ist nur eine Optimierung; ohne ihn wird beim nächsten Lauf neu abgefragt.
+        pass  # The cache is only an optimisation; without it the next run fetches again.
 
 
 def lookup_cves(
@@ -94,7 +94,7 @@ def lookup_cves(
     fetch=fetch_cve,
     now: float | None = None,
 ) -> tuple[dict[str, CveInfo], list[str]]:
-    """Liefert Infos zu allen IDs und die Liste der IDs, deren Abfrage fehlschlug."""
+    """Returns info for all IDs and the list of IDs whose lookup failed."""
     ids = sorted(set(cve_ids))
     if not ids:
         return {}, []

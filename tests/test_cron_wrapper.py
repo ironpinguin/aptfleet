@@ -1,4 +1,4 @@
-"""Tests für cron/aptfleet-mail.sh mit einem Stub statt aptfleet.py."""
+"""Tests for cron/aptfleet-mail.sh with a stub instead of aptfleet.py."""
 from __future__ import annotations
 
 import email
@@ -11,15 +11,15 @@ from pathlib import Path
 
 WRAPPER = Path(__file__).resolve().parent.parent / "cron" / "aptfleet-mail.sh"
 
-# Stub für aptfleet.py: schreibt die --html-Datei, gibt Text aus, Exit-Code aus STUB_RC.
+# Stub for aptfleet.py: writes the --html file, prints text, exit code from STUB_RC.
 CHECK_STUB = """import os, sys
 args = sys.argv[1:]
 open(os.environ["STUB_ARGS"], "w").write("\\n".join(args))
 html = args[args.index("--html") + 1]
 if os.environ.get("STUB_NO_HTML") != "1":
-    open(html, "w", encoding="utf-8").write("<html><body>Bericht äöü</body></html>")
-    print(f"HTML-Report geschrieben: {html}")
-print("Zusammenfassung: 1 Host, 2 Updates, 1 Security – äöü")
+    open(html, "w", encoding="utf-8").write("<html><body>Report äöü</body></html>")
+    print(f"HTML report written: {html}")
+print("Summary: 1 host, 2 updates, 1 security – äöü")
 sys.exit(int(os.environ.get("STUB_RC", "1")))
 """
 
@@ -59,16 +59,16 @@ class CronWrapperTest(unittest.TestCase):
         self.assertEqual(msg["To"], "a@example.com, b@example.com")
         self.assertEqual(msg["From"], "r@example.com")
         self.assertEqual(str(msg["Subject"]),
-                         "[updates] testhost: Security-Updates oder offene KEV-Lücke")
+                         "[aptfleet] testhost: security updates or open KEV vulnerability")
         self.assertTrue(msg.is_multipart())
         body = msg.get_body(preferencelist=("plain",)).get_content()
-        self.assertIn("Zusammenfassung: 1 Host, 2 Updates, 1 Security – äöü", body)
-        self.assertNotIn("HTML-Report geschrieben", body)
-        self.assertIn("Bericht äöü", msg.get_body(preferencelist=("html",)).get_content())
+        self.assertIn("Summary: 1 host, 2 updates, 1 security – äöü", body)
+        self.assertNotIn("HTML report written", body)
+        self.assertIn("Report äöü", msg.get_body(preferencelist=("html",)).get_content())
         attachments = list(msg.iter_attachments())
         self.assertEqual(len(attachments), 1)
         self.assertRegex(attachments[0].get_filename(), r"^updates-testhost-.*\.html$")
-        self.assertIn("Bericht äöü", attachments[0].get_content())
+        self.assertIn("Report äöü", attachments[0].get_content())
 
     def test_default_args_check_local_and_add_html(self):
         self.run_wrapper("MAIL_TRANSPORT=print\n")
@@ -87,13 +87,13 @@ class CronWrapperTest(unittest.TestCase):
     def test_always_mode_sends_when_all_ok(self):
         proc = self.run_wrapper("MAIL_TRANSPORT=print\nMAIL_WHEN=always\n", rc=0)
         self.assertEqual(proc.returncode, 0)
-        self.assertIn("keine dringenden Updates", email.message_from_string(
+        self.assertIn("no urgent updates", email.message_from_string(
             proc.stdout, policy=email.policy.default)["Subject"])
 
     def test_without_html_only_text(self):
         proc = self.run_wrapper("MAIL_TRANSPORT=print\n", rc=2, extra_env={"STUB_NO_HTML": "1"})
         msg = email.message_from_string(proc.stdout, policy=email.policy.default)
-        self.assertIn("FEHLER", msg["Subject"])
+        self.assertIn("ERROR", msg["Subject"])
         self.assertEqual(list(msg.iter_attachments()), [])
         self.assertIsNone(msg.get_body(preferencelist=("html",)))
 
@@ -118,7 +118,7 @@ class CronWrapperTest(unittest.TestCase):
     def test_sendmail_failure_gives_4(self):
         proc = self.run_wrapper('MAIL_TO="a@example.com"\nSENDMAIL="/bin/false"\n')
         self.assertEqual(proc.returncode, 4)
-        self.assertIn("fehlgeschlagen", proc.stderr)
+        self.assertIn("failed", proc.stderr)
 
     def test_dry_run_prints_even_if_ok_and_sendmail_configured(self):
         env_file = self.tmp / "dry.env"
@@ -137,7 +137,7 @@ class CronWrapperTest(unittest.TestCase):
         self.assertIn("MAIL_TO", proc.stderr)
 
     def test_missing_env_file_gives_5(self):
-        proc = subprocess.run(["bash", str(WRAPPER), str(self.tmp / "gibtsnicht")],
+        proc = subprocess.run(["bash", str(WRAPPER), str(self.tmp / "does-not-exist")],
                               capture_output=True, text=True, timeout=30)
         self.assertEqual(proc.returncode, 5)
 
@@ -151,7 +151,7 @@ class CronWrapperTest(unittest.TestCase):
         self.run_wrapper(f'MAIL_TRANSPORT=print\nREPORT_DIR="{archive}"\n')
         files = list(archive.glob("updates-testhost-*.html"))
         self.assertEqual(len(files), 1)
-        self.assertIn("Bericht", files[0].read_text(encoding="utf-8"))
+        self.assertIn("Report", files[0].read_text(encoding="utf-8"))
 
     def test_temp_dir_is_removed(self):
         self.run_wrapper("MAIL_TRANSPORT=print\n")

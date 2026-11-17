@@ -1,4 +1,4 @@
-"""CISA-KEV-Katalog (Known Exploited Vulnerabilities) laden und lokal cachen."""
+"""Load the CISA KEV catalog (Known Exploited Vulnerabilities) and cache it locally."""
 from __future__ import annotations
 
 import datetime
@@ -30,16 +30,16 @@ class KevEntry:
 class KevData:
     entries: dict[str, KevEntry]
     fetched_at: float
-    stale: bool  # True: Abruf fehlgeschlagen, abgelaufener Cache verwendet
+    stale: bool  # True: fetch failed, expired cache used
 
 
 def parse_kev_json(data: dict) -> dict[str, KevEntry]:
-    """Wandelt den KEV-Feed in Einträge um; Einträge ohne gültige cveID werden übersprungen.
+    """Converts the KEV feed into entries; entries without a valid cveID are skipped.
 
-    Ein Feed ohne gültige Einträge gilt als Fehler (ValueError)."""
+    A feed without valid entries is an error (ValueError)."""
     vulnerabilities = data.get("vulnerabilities") if isinstance(data, dict) else None
     if not isinstance(vulnerabilities, list):
-        raise ValueError("KEV-Feed ohne Liste 'vulnerabilities'")
+        raise ValueError("KEV feed has no 'vulnerabilities' list")
     entries: dict[str, KevEntry] = {}
     for item in vulnerabilities:
         if not isinstance(item, dict):
@@ -56,7 +56,7 @@ def parse_kev_json(data: dict) -> dict[str, KevEntry]:
             date_added=str(item.get("dateAdded") or ""),
         )
     if not entries:
-        raise ValueError("KEV-Feed ohne gültige Einträge")
+        raise ValueError("KEV feed has no valid entries")
     return entries
 
 
@@ -66,7 +66,7 @@ def fetch_kev() -> dict:
 
 
 def _load_cache(path: Path) -> KevData | None:
-    """Liest den Cache; fehlende oder kaputte Dateien zählen als kein Cache."""
+    """Reads the cache; missing or broken files count as no cache."""
     try:
         raw = json.loads(path.read_text())
         fetched_at = float(raw["fetched_at"])
@@ -92,7 +92,7 @@ def _save_cache(path: Path, kev: KevData) -> None:
         tmp.write_text(json.dumps(payload, indent=1, sort_keys=True))
         tmp.replace(path)
     except OSError:
-        pass  # Cache ist nur eine Optimierung; ohne ihn wird beim nächsten Lauf neu abgefragt.
+        pass  # The cache is only an optimisation; without it the next run fetches again.
 
 
 def load_kev(
@@ -100,7 +100,7 @@ def load_kev(
     fetch=fetch_kev,
     now: float | None = None,
 ) -> KevData | None:
-    """Liefert den KEV-Katalog (Cache, 24 h TTL); None, wenn weder Abruf noch Cache möglich."""
+    """Returns the KEV catalog (cache, 24 h TTL); None if neither fetch nor cache is available."""
     now = time.time() if now is None else now
     cached = _load_cache(cache_path)
     if cached is not None and now - cached.fetched_at < CACHE_TTL_SECONDS:
@@ -118,9 +118,9 @@ def load_kev(
 
 
 def recent_entries(kev: KevData, days: int, today: datetime.date) -> list[KevEntry]:
-    """Einträge der letzten `days` Kalendertage inkl. heute, neueste zuerst, dann nach CVE-ID."""
+    """Entries from the last `days` calendar days including today, newest first, then by CVE ID."""
     cutoff = (today - datetime.timedelta(days=days)).isoformat()
     recent = [e for e in kev.entries.values() if e.date_added > cutoff]
     recent.sort(key=lambda e: e.cve_id)
-    recent.sort(key=lambda e: e.date_added, reverse=True)  # stabil: CVE-ID bleibt Tiebreaker
+    recent.sort(key=lambda e: e.date_added, reverse=True)  # stable: CVE ID stays the tiebreaker
     return recent

@@ -1,4 +1,4 @@
-"""SSH-Ausführung des Remote-Skripts auf den Hosts."""
+"""Runs the remote script on the hosts via SSH."""
 from __future__ import annotations
 
 import shlex
@@ -14,12 +14,12 @@ MAX_WORKERS = 6
 SOURCES_MARKER = "===SECTION sources==="
 CONNECT_TIMEOUT = 15
 
-# Bash-Fragment: liest "<paket> <version>"-Zeilen von stdin und gibt aus
-#   "<paket> <version>", wenn das Paar in einer Ubuntu-Paketliste steht (apt-Listen mit
-#   "Origin: Ubuntu"), sonst
-#   "<paket> *", wenn der Name in einer Ubuntu- und in keiner Fremd-Paketliste vorkommt
-#   (Ubuntu-Indizes führen nur Release- und neueste Update-Version; überholte Versionen).
-# Die Gruppen werden per awk-Zuweisungsoperand (g=u / g=f) getrennt. POSIX-awk, mawk-kompatibel.
+# Bash fragment: reads "<package> <version>" lines from stdin and prints
+#   "<package> <version>" if the pair is in an Ubuntu package list (apt lists with
+#   "Origin: Ubuntu"), otherwise
+#   "<package> *" if the name appears in an Ubuntu package list and in no third-party one
+#   (Ubuntu indexes only carry the release and the newest update version; superseded versions).
+# The groups are separated by awk assignment operands (g=u / g=f). POSIX awk, mawk-compatible.
 ORIGINS_SNIPPET = r"""lists="${APT_LISTS:-/var/lib/apt/lists}"
 ubuntu=""
 foreign=""
@@ -39,9 +39,9 @@ awk 'g == "" { want[$1" "$2]=1; name[$1]=1; next }
        k=p" "$2; if ((k in want) && !(k in seen)) { print k; seen[k]=1; hit[p]=1 } }
      END { for (p in inu) if (!(p in inf) && !(p in hit)) print p" *" }' - g=u $ubuntu g=f $foreign"""
 
-# Wird per stdin an `bash -s -- <refresh 0|1> [paket ...]` übergeben; legt nichts auf dem Host ab.
-# Ohne Refresh braucht das Skript kein sudo.
-# Alle Befehle bekommen </dev/null, damit sie nicht den Rest des Skripts von stdin lesen.
+# Passed via stdin to `bash -s -- <refresh 0|1> [package ...]`; stores nothing on the host.
+# Without refresh the script needs no sudo.
+# Every command gets </dev/null so it does not read the rest of the script from stdin.
 REMOTE_SCRIPT = r"""
 export LC_ALL=C
 REFRESH="${1:-1}"
@@ -53,7 +53,7 @@ echo "===SECTION os==="
 
 echo "===SECTION apt_update==="
 if [ "$REFRESH" = "1" ]; then
-  # Als root (z. B. lokaler Cronjob) ohne sudo, sonst sudo ohne Passwort.
+  # As root (e.g. local cron job) without sudo, otherwise passwordless sudo.
   sudo=""
   [ "$(id -u)" = "0" ] || sudo="sudo -n"
   out=$(timeout 90 $sudo apt-get update -qq </dev/null 2>&1)
@@ -64,9 +64,9 @@ else
   echo "rc=skipped"
 fi
 
-# Stand der Paketlisten: "now <epoch>", danach Epochen der Update-Stempel
-# (update-notifier/apt.systemd.daily), von lists/partial (ändert apt bei jedem Update)
-# und der neuesten Release-Datei (trägt nur das Veröffentlichungsdatum des Servers).
+# Package lists last updated: "now <epoch>", then epochs of the update stamps
+# (update-notifier/apt.systemd.daily), of lists/partial (apt touches it on every update)
+# and of the newest Release file (only carries the server's publication date).
 echo "===SECTION lists_age==="
 mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
 echo "now $(date +%s)"
@@ -109,7 +109,7 @@ echo "===SECTION kernel==="
 uname -r </dev/null 2>/dev/null
 
 echo "===SECTION origins==="
-# stdin kommt hier ausdrücklich aus der Pipe, nicht aus dem Skript-stdin.
+# stdin here explicitly comes from the pipe, not from the script stdin.
 printf '%s\n' "$installed" | awk '$1=="ii"{print $2" "$3}' | {
 @@ORIGINS_SNIPPET@@
 }
@@ -134,20 +134,20 @@ echo "===END==="
 
 
 SECTION_PREFIX = "===SECTION "
-# Was der Host gerade tut, sobald die jeweilige Sektion beginnt (Fortschrittsanzeige).
+# What the host is doing once the respective section starts (progress output).
 SECTION_PHASES = {
-    "os": "verbunden",
+    "os": "connected",
     "apt_update": "apt-get update",
-    "upgradable": "anstehende Updates ermitteln",
-    "installed": "installierte Pakete lesen",
-    "origins": "Paketherkunft prüfen",
-    "sources": "Quellpakete zuordnen",
+    "upgradable": "listing pending updates",
+    "installed": "reading installed packages",
+    "origins": "checking package origin",
+    "sources": "mapping source packages",
 }
 
 
 def phase_tracker(on_phase):
-    """Liefert einen Zeilen-Callback, der aus den Sektionsmarkern der Remote-Ausgabe
-    Phasen für on_phase(text) macht; Changelogs werden als "Changelog n/m: <quelle>" gezählt."""
+    """Returns a line callback that turns the section markers of the remote output into
+    phases for on_phase(text); changelogs are counted as "Changelog n/m: <source>"."""
     state = {"section": None, "sources": set(), "changelogs": 0}
 
     def on_line(line: str) -> None:
@@ -170,9 +170,9 @@ def phase_tracker(on_phase):
 
 
 def stream_run(cmd, *, input, timeout, on_line=None, encoding="utf-8", errors="replace", **kwargs):
-    """Wie subprocess.run(..., capture_output=True); mit on_line wird stdout zusätzlich
-    zeilenweise gemeldet, während der Prozess noch läuft. Bei Timeout enthält
-    TimeoutExpired.output die bis dahin gelesene Ausgabe."""
+    """Like subprocess.run(..., capture_output=True); with on_line, stdout is also
+    reported line by line while the process is still running. On timeout,
+    TimeoutExpired.output contains the output read so far."""
     if on_line is None:
         return subprocess.run(cmd, input=input, timeout=timeout, encoding=encoding,
                               errors=errors, capture_output=True)
@@ -232,7 +232,7 @@ def build_ssh_command(
     packages: list[str],
     user: str | None = None,
 ) -> list[str]:
-    """Ohne ssh_config greift die normale ~/.ssh/config; user setzt den Login-Namen."""
+    """Without ssh_config the normal ~/.ssh/config applies; user sets the login name."""
     args = ["1" if refresh else "0", *packages]
     remote_cmd = "bash -s -- " + " ".join(shlex.quote(arg) for arg in args)
     cmd = ["ssh"]
@@ -245,7 +245,7 @@ def build_ssh_command(
 
 
 def build_local_command(refresh: bool, packages: list[str]) -> list[str]:
-    """Führt das Remote-Skript auf dem eigenen Rechner aus (--local, ohne SSH)."""
+    """Runs the remote script on the local machine (--local, without SSH)."""
     return ["bash", "-s", "--", "1" if refresh else "0", *packages]
 
 
@@ -260,8 +260,8 @@ def run_host(
     on_phase=None,
     local: bool = False,
 ) -> HostResult:
-    """on_phase(text) meldet, was auf dem Host gerade läuft (nur für die Fortschrittsanzeige).
-    local: Skript lokal per bash statt per SSH ausführen; host ist dann nur der Anzeigename."""
+    """on_phase(text) reports what is currently running on the host (progress output only).
+    local: run the script locally with bash instead of via SSH; host is then only the display name."""
     if local:
         cmd = build_local_command(refresh, packages)
     else:
@@ -269,7 +269,7 @@ def run_host(
     tool = "bash" if local else "ssh"
     extra = {"on_line": phase_tracker(on_phase)} if on_phase else {}
     if on_phase:
-        on_phase("lokal starten" if local else "SSH-Verbindung")
+        on_phase("starting locally" if local else "SSH connection")
     try:
         proc = runner(
             cmd,
@@ -284,18 +284,18 @@ def run_host(
         partial = exc.stdout or ""
         if isinstance(partial, bytes):
             partial = partial.decode("utf-8", errors="replace")
-        # Paketliste ist vollständig, nur Changelogs fehlen: Teilergebnis statt Fehler.
+        # Package list is complete, only changelogs are missing: partial result instead of error.
         if SOURCES_MARKER in partial:
-            note = f"\n===SECTION timeout===\nTimeout nach {timeout}s – Changelogs unvollständig\n"
+            note = f"\n===SECTION timeout===\nTimeout after {timeout}s – changelogs incomplete\n"
             return HostResult(host, True, None, partial + note)
-        return HostResult(host, False, f"{tool} timeout nach {timeout}s", "")
+        return HostResult(host, False, f"{tool} timeout after {timeout}s", "")
     except OSError as exc:
-        return HostResult(host, False, f"{tool} nicht ausführbar: {exc}", "")
+        return HostResult(host, False, f"{tool} not executable: {exc}", "")
 
     if proc.returncode == 0 and END_MARKER in proc.stdout:
         return HostResult(host, True, None, proc.stdout)
     if proc.returncode == 0:
-        return HostResult(host, False, f"unvollständige Ausgabe (kein {END_MARKER})", proc.stdout)
+        return HostResult(host, False, f"incomplete output (no {END_MARKER})", proc.stdout)
     stderr_lines = [line for line in proc.stderr.splitlines() if line.strip()]
     reason = stderr_lines[-1] if stderr_lines else f"exit code {proc.returncode}"
     return HostResult(host, False, reason, proc.stdout)
@@ -313,8 +313,8 @@ def run_all(
     progress=None,
     local: bool = False,
 ) -> list[HostResult]:
-    """progress: Objekt mit host_phase(host, text) und host_done(host, error), z. B. progress.Progress.
-    local: siehe run_host."""
+    """progress: object with host_phase(host, text) and host_done(host, error), e.g. progress.Progress.
+    local: see run_host."""
 
     def check(host: str) -> HostResult:
         if progress is None:

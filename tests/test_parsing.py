@@ -109,9 +109,9 @@ class ParseUpgradableTest(unittest.TestCase):
         self.assertEqual(docker.old_version, "5:28.0.4-1~ubuntu.24.04~noble")
 
     def test_skips_listing_header_and_reports_garbage(self):
-        upgrades, unparsed = parse_upgradable("Listing... Done\nkaputte zeile\n\n")
+        upgrades, unparsed = parse_upgradable("Listing... Done\nbroken line\n\n")
         self.assertEqual(upgrades, [])
-        self.assertEqual(unparsed, ["kaputte zeile"])
+        self.assertEqual(unparsed, ["broken line"])
 
     def test_tolerates_german_locale(self):
         line = "curl/jammy-security 7.81.0-1ubuntu1.20 amd64 [aktualisierbar von: 7.81.0-1ubuntu1.19]"
@@ -191,7 +191,7 @@ class ChangelogTest(unittest.TestCase):
 
 class BuildHostReportTest(unittest.TestCase):
     def test_full_fixture(self):
-        report = build_host_report("webserver-ansible", fixture("remote_output.txt"))
+        report = build_host_report("web1", fixture("remote_output.txt"))
         self.assertIsNone(report.error)
         self.assertEqual(report.os_version, "24.04")
         self.assertEqual(report.warnings, [])
@@ -215,14 +215,14 @@ class BuildHostReportTest(unittest.TestCase):
         self.assertFalse(by_name["docker-ce"].changelog_available)
 
     def test_binaries_of_same_source_share_changelog(self):
-        report = build_host_report("webserver-ansible", fixture("remote_output.txt"))
+        report = build_host_report("web1", fixture("remote_output.txt"))
         by_name = {p.upgrade.package: p for p in report.packages}
         self.assertEqual(by_name["libssl3t64"].source, "openssl")
         self.assertEqual(by_name["libssl3t64"].cves, by_name["openssl"].cves)
 
     def test_error_report(self):
-        report = build_host_report("pdf-ansible", "", error="ssh timeout nach 120s")
-        self.assertEqual(report.error, "ssh timeout nach 120s")
+        report = build_host_report("db1", "", error="ssh timeout after 120s")
+        self.assertEqual(report.error, "ssh timeout after 120s")
         self.assertEqual(report.packages, [])
 
     def test_failed_apt_update_warns_but_keeps_packages(self):
@@ -237,13 +237,13 @@ class BuildHostReportTest(unittest.TestCase):
             "===SECTION sources===\ntzdata tzdata\n"
             "===END===\n"
         )
-        report = build_host_report("git-ansible", raw)
+        report = build_host_report("mail1", raw)
         self.assertEqual(
             report.warnings,
             [
-                "apt-get update fehlgeschlagen (rc=100): "
-                "E: Could not get lock /var/lib/apt/lists/lock – nutze vorhandene Paketlisten, "
-                f"Stand {local_time(1762900000)} (vor 2 Tagen)"
+                "apt-get update failed (rc=100): "
+                "E: Could not get lock /var/lib/apt/lists/lock – using existing package lists, "
+                f"last updated {local_time(1762900000)} (2 days ago)"
             ],
         )
         self.assertEqual(len(report.packages), 1)
@@ -255,26 +255,26 @@ class BuildHostReportTest(unittest.TestCase):
             "===SECTION lists_age===\nnow 1763100000\nstamp 1763092800\nlists 1763000000\n"
             "===END===\n"
         )
-        report = build_host_report("git-ansible", raw)
+        report = build_host_report("mail1", raw)
         self.assertEqual(report.lists_updated, 1763092800)
         self.assertEqual(report.lists_age, 7200)
         self.assertEqual(
             report.warnings,
             [
-                f"Paketlisten nicht aktualisiert (--no-refresh), Stand {local_time(1763092800)}"
-                " (vor 2 Std.) – Updates und Security-Infos können veraltet sein"
+                f"Package lists not refreshed (--no-refresh), last updated {local_time(1763092800)}"
+                " (2 h ago) – updates and security info may be outdated"
             ],
         )
 
     def test_skipped_apt_update_with_unknown_lists_age(self):
         raw = "===SECTION apt_update===\nrc=skipped\n===SECTION lists_age===\nnow 1763100000\n===END===\n"
-        report = build_host_report("git-ansible", raw)
+        report = build_host_report("mail1", raw)
         self.assertIsNone(report.lists_age)
         self.assertEqual(
             report.warnings,
             [
-                "Paketlisten nicht aktualisiert (--no-refresh), Stand unbekannt"
-                " – Updates und Security-Infos können veraltet sein"
+                "Package lists not refreshed (--no-refresh), last updated unknown"
+                " – updates and security info may be outdated"
             ],
         )
 
@@ -283,7 +283,7 @@ class BuildHostReportTest(unittest.TestCase):
             "===SECTION apt_update===\nrc=0\n"
             "===SECTION lists_age===\nnow 1763100000\nstamp 1763100000\n===END===\n"
         )
-        report = build_host_report("git-ansible", raw)
+        report = build_host_report("mail1", raw)
         self.assertEqual(report.warnings, [])
         self.assertEqual(report.lists_age, 0)
 
@@ -296,15 +296,15 @@ class BuildHostReportTest(unittest.TestCase):
         self.assertEqual(parse_lists_age(""), (None, None))
 
     def test_format_age(self):
-        self.assertEqual(format_age(59), "vor 0 Min.")
-        self.assertEqual(format_age(3599), "vor 59 Min.")
-        self.assertEqual(format_age(3600), "vor 1 Std.")
-        self.assertEqual(format_age(48 * 3600 - 1), "vor 47 Std.")
-        self.assertEqual(format_age(48 * 3600), "vor 2 Tagen")
+        self.assertEqual(format_age(59), "0 min ago")
+        self.assertEqual(format_age(3599), "59 min ago")
+        self.assertEqual(format_age(3600), "1 h ago")
+        self.assertEqual(format_age(48 * 3600 - 1), "47 h ago")
+        self.assertEqual(format_age(48 * 3600), "2 days ago")
 
     def test_no_refresh_has_no_warning_and_missing_os_is_none(self):
         raw = "===SECTION upgradable===\n===SECTION sources===\n===END===\n"
-        report = build_host_report("git-ansible", raw)
+        report = build_host_report("mail1", raw)
         self.assertEqual(report.warnings, [])
         self.assertIsNone(report.os_version)
         self.assertEqual(report.packages, [])
@@ -320,14 +320,14 @@ class BuildHostReportTest(unittest.TestCase):
             "grub2-signed (1.202) noble; urgency=medium\n\n  * Fix CVE-2025-0001.\n\n -- A <a@b>  date\n"
             "===END===\n"
         )
-        pkg = build_host_report("rootserver-ansible", raw).packages[0]
+        pkg = build_host_report("app1", raw).packages[0]
         self.assertFalse(pkg.changelog_uncertain)
         self.assertEqual(pkg.cves, ["CVE-2025-0002"])
 
     def test_unparsed_lines_are_collected(self):
-        raw = "===SECTION upgradable===\nquatsch\n===END===\n"
-        report = build_host_report("git-ansible", raw)
-        self.assertEqual(report.unparsed, ["quatsch"])
+        raw = "===SECTION upgradable===\ngarbage\n===END===\n"
+        report = build_host_report("mail1", raw)
+        self.assertEqual(report.unparsed, ["garbage"])
 
 
 class NewSectionsTest(unittest.TestCase):
@@ -379,9 +379,9 @@ class NewSectionsTest(unittest.TestCase):
 
     def test_vuln_check_problems(self):
         base = "===SECTION os===\n24.04\nnoble\n===SECTION installed===\nii  a 1 a 1\n"
-        self.assertEqual(build_host_report("h", "===SECTION os===\n24.04\n===END===").vuln_check_problem, "kein Ubuntu-Codename")
-        self.assertEqual(build_host_report("h", "===SECTION os===\n24.04\nnoble\n===END===").vuln_check_problem, "keine Paketliste")
-        self.assertEqual(build_host_report("h", base + "===END===").vuln_check_problem, "Paketherkunft nicht ermittelbar")
+        self.assertEqual(build_host_report("h", "===SECTION os===\n24.04\n===END===").vuln_check_problem, "no Ubuntu codename")
+        self.assertEqual(build_host_report("h", "===SECTION os===\n24.04\nnoble\n===END===").vuln_check_problem, "no package list")
+        self.assertEqual(build_host_report("h", base + "===END===").vuln_check_problem, "package origin could not be determined")
         self.assertEqual(build_host_report("h", base + "===SECTION origins===\na 1\n===END===").vuln_check_problem, None)
         self.assertEqual(build_host_report("h", base + "===SECTION origins===\na *\n===END===").vuln_check_problem, None)
 
@@ -391,7 +391,7 @@ class NewSectionsTest(unittest.TestCase):
             "h", base + "===SECTION kernel===\n6.8.0-40-generic\n===SECTION origins===\na 1\n===END==="
         )
         self.assertEqual(
-            report.vuln_check_problem, "Kernel-Prüfung nicht möglich: kein Paket für 6.8.0-40-generic"
+            report.vuln_check_problem, "kernel check not possible: no package for 6.8.0-40-generic"
         )
 
     def test_running_kernel_image_found_without_ubuntu_origin(self):
@@ -404,7 +404,7 @@ class NewSectionsTest(unittest.TestCase):
 
     def test_other_problem_wins_over_missing_kernel_image(self):
         raw = "===SECTION os===\n24.04\nnoble\n===SECTION kernel===\n6.8.0-40-generic\n===END==="
-        self.assertEqual(build_host_report("h", raw).vuln_check_problem, "keine Paketliste")
+        self.assertEqual(build_host_report("h", raw).vuln_check_problem, "no package list")
 
     def test_error_leaves_problem_none(self):
         self.assertIsNone(build_host_report("h", "", error="x").vuln_check_problem)

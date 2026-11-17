@@ -25,7 +25,7 @@ class FakeFetch:
         self.calls.append(cve_id)
         if cve_id in self.fail:
             raise urllib.error.URLError("offline")
-        return CveInfo(cve_id, "high", f"Beschreibung {cve_id}")
+        return CveInfo(cve_id, "high", f"Description {cve_id}")
 
 
 class ParseCveJsonTest(unittest.TestCase):
@@ -69,7 +69,7 @@ class LookupCvesTest(unittest.TestCase):
         fetch2 = FakeFetch()
         infos2, _ = lookup_cves(["CVE-1"], self.cache, fetch2, now=1000.0 + 60)
         self.assertEqual(fetch2.calls, [])
-        self.assertEqual(infos2["CVE-1"], CveInfo("CVE-1", "high", "Beschreibung CVE-1"))
+        self.assertEqual(infos2["CVE-1"], CveInfo("CVE-1", "high", "Description CVE-1"))
 
     def test_refetches_after_ttl(self):
         lookup_cves(["CVE-1"], self.cache, FakeFetch(), now=1000.0)
@@ -87,15 +87,15 @@ class LookupCvesTest(unittest.TestCase):
 
     def test_corrupt_cache_is_ignored(self):
         self.cache.parent.mkdir(parents=True)
-        self.cache.write_text("{kaputt")
+        self.cache.write_text("{broken")
         infos, failed = lookup_cves(["CVE-1"], self.cache, FakeFetch(), now=1000.0)
         self.assertEqual(failed, [])
         self.assertEqual(infos["CVE-1"].priority, "high")
         self.assertIn("CVE-1", json.loads(self.cache.read_text()))
 
     def test_unwritable_cache_does_not_crash(self):
-        blocker = Path(self._tmp.name) / "datei"
-        blocker.write_text("kein verzeichnis")
+        blocker = Path(self._tmp.name) / "file"
+        blocker.write_text("not a directory")
         infos, failed = lookup_cves(["CVE-1"], blocker / "cves.json", FakeFetch(), now=1000.0)
         self.assertEqual(infos["CVE-1"].priority, "high")
         self.assertEqual(failed, [])
@@ -139,7 +139,7 @@ class BuildSslContextTest(unittest.TestCase):
 
     def test_missing_fallback_file_is_ignored(self):
         ctx = FakeContext(0)
-        build_ssl_context(Path(self._tmp.name) / "fehlt.pem", factory=lambda: ctx)
+        build_ssl_context(Path(self._tmp.name) / "missing.pem", factory=lambda: ctx)
         self.assertEqual(ctx.loaded, [])
 
 

@@ -1,0 +1,45 @@
+name: Bug report
+description: Something isn't working as expected.
+labels: ["bug"]
+body:
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you start
+      options:
+        - label: I searched the existing issues and found no matching report.
+          required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: The incorrect behaviour, including the exact output or error message.
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: The command you ran (remove host names you don't want to share).
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: aptfleet version or commit
+      placeholder: "1.0.0 / .deb / git checkout at abc1234"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Ubuntu release of the checked host(s), Python version where aptfleet runs.
+      placeholder: "hosts: Ubuntu 24.04, 22.04; aptfleet runs on Debian 12, Python 3.11"
