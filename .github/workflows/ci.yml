@@ -23,14 +23,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 3.9: oldest supported (Debian 11); 3.10/3.12/3.13: Ubuntu 22.04/24.04/26.04
-        python: ["3.9", "3.10", "3.12", "3.13"]
+        python: ["3.10", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
       - run: make test
+
+  # Oldest supported Python. setup-python has no 3.9 build for the current
+  # runner image, so this runs in the official Python image instead.
+  test-python39:
+    runs-on: ubuntu-latest
+    container: python:3.9-slim
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 -m unittest discover -s tests -t .
 
   shellcheck:
     runs-on: ubuntu-latest
@@ -39,7 +47,7 @@ jobs:
       - run: shellcheck cron/aptfleet-mail.sh packaging/aptfleet packaging/aptfleet-mail packaging/postinst packaging/prerm
 
   package:
-    needs: [test, shellcheck]
+    needs: [test, test-python39, shellcheck]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

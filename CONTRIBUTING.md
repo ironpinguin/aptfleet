@@ -38,7 +38,7 @@ because aptfleet is meant to be copied onto any Ubuntu server and just work.
 - Open an issue before a larger change so the design can be agreed there
   rather than in a finished pull request. Small fixes can go straight to a PR.
 - Work on a feature branch and open a pull request against `main`.
-- CI (tests on all supported Python versions, shellcheck, package build) must
+- CI (tests on Python 3.9 to 3.14, shellcheck, package build) must
   be green before merging.
 - Keep commits focused with a clear, descriptive message in the imperative mood.
 - Add a line to the `[Unreleased]` section of [CHANGELOG.md](CHANGELOG.md) for
