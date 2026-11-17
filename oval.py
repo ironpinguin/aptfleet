@@ -15,7 +15,7 @@ from typing import Iterable
 from cve_info import _default_ssl_context
 
 OVAL_URL = "https://security-metadata.canonical.com/oval/com.ubuntu.{codename}.cve.oval.xml.bz2"
-DEFAULT_CACHE_DIR = Path.home() / ".cache" / "updates_report"
+DEFAULT_CACHE_DIR = Path.home() / ".cache" / "aptfleet"
 CACHE_TTL_SECONDS = 24 * 3600
 FETCH_TIMEOUT = 120
 

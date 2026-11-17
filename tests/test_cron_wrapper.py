@@ -1,4 +1,4 @@
-"""Tests für cron/updates-report.sh mit einem Stub statt check_updates.py."""
+"""Tests für cron/aptfleet-mail.sh mit einem Stub statt aptfleet.py."""
 from __future__ import annotations
 
 import email
@@ -9,9 +9,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-WRAPPER = Path(__file__).resolve().parent.parent / "cron" / "updates-report.sh"
+WRAPPER = Path(__file__).resolve().parent.parent / "cron" / "aptfleet-mail.sh"
 
-# Stub für check_updates.py: schreibt die --html-Datei, gibt Text aus, Exit-Code aus STUB_RC.
+# Stub für aptfleet.py: schreibt die --html-Datei, gibt Text aus, Exit-Code aus STUB_RC.
 CHECK_STUB = """import os, sys
 args = sys.argv[1:]
 open(os.environ["STUB_ARGS"], "w").write("\\n".join(args))
@@ -38,7 +38,7 @@ class CronWrapperTest(unittest.TestCase):
     def run_wrapper(self, env_lines: str, rc: int = 1, extra_env: dict | None = None):
         env_file = self.tmp / "test.env"
         env_file.write_text(
-            f'CHECK_UPDATES="{self.stub}"\nREPORT_NAME="testhost"\n' + env_lines
+            f'APTFLEET="{self.stub}"\nREPORT_NAME="testhost"\n' + env_lines
         )
         env = {
             "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
@@ -77,7 +77,7 @@ class CronWrapperTest(unittest.TestCase):
         self.assertEqual(args[3], "--html")
 
     def test_check_args_are_passed(self):
-        self.run_wrapper('MAIL_TRANSPORT=print\nCHECK_ARGS="--local --security-only"\n')
+        self.run_wrapper('MAIL_TRANSPORT=print\nAPTFLEET_ARGS="--local --security-only"\n')
         self.assertEqual(self.args_file.read_text().splitlines()[:2], ["--local", "--security-only"])
 
     def test_problems_mode_sends_nothing_when_all_ok(self):
@@ -122,7 +122,7 @@ class CronWrapperTest(unittest.TestCase):
 
     def test_dry_run_prints_even_if_ok_and_sendmail_configured(self):
         env_file = self.tmp / "dry.env"
-        env_file.write_text(f'CHECK_UPDATES="{self.stub}"\nMAIL_TO="a@example.com"\n'
+        env_file.write_text(f'APTFLEET="{self.stub}"\nMAIL_TO="a@example.com"\n'
                             'MAIL_TRANSPORT=sendmail\nSENDMAIL=/bin/false\nMAIL_WHEN=problems\n')
         proc = subprocess.run(
             ["bash", str(WRAPPER), "--dry-run", str(env_file)], capture_output=True, text=True,
@@ -155,7 +155,7 @@ class CronWrapperTest(unittest.TestCase):
 
     def test_temp_dir_is_removed(self):
         self.run_wrapper("MAIL_TRANSPORT=print\n")
-        self.assertEqual(list(self.tmp.glob("updates-report.*")), [])
+        self.assertEqual(list(self.tmp.glob("aptfleet-mail.*")), [])
 
 
 if __name__ == "__main__":

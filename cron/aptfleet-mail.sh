@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Führt check_updates.py aus (z. B. per Cronjob) und verschickt das Ergebnis per Mail:
+# Führt aptfleet.py aus (z. B. per Cronjob) und verschickt das Ergebnis per Mail:
 # Text-Report als Mailtext, HTML-Report eingebettet und als Anhang.
 #
-# Aufruf: updates-report.sh [--dry-run] [ENV-DATEI]   (Default: /etc/updates-report.env)
+# Aufruf: aptfleet-mail.sh [--dry-run] [ENV-DATEI]   (Default: /etc/aptfleet/mail.env)
 #   --dry-run  Mail immer erzeugen und auf stdout ausgeben statt verschicken
-# Konfiguration: siehe updates-report.env.sample
+# Konfiguration: siehe mail.env.sample
 #
-# Exit-Code: der von check_updates.py; 4, wenn der Mailversand fehlschlägt;
+# Exit-Code: der von aptfleet.py; 4, wenn der Mailversand fehlschlägt;
 # 5 bei Konfigurationsfehlern.
 set -uo pipefail
 
@@ -15,18 +15,18 @@ if [ "${1:-}" = --dry-run ]; then
   DRY_RUN=1
   shift
 fi
-ENV_FILE="${1:-/etc/updates-report.env}"
+ENV_FILE="${1:-/etc/aptfleet/mail.env}"
 if [ ! -r "$ENV_FILE" ]; then
-  echo "updates-report: Konfiguration $ENV_FILE nicht lesbar" >&2
+  echo "aptfleet-mail: Konfiguration $ENV_FILE nicht lesbar" >&2
   exit 5
 fi
 # shellcheck source=/dev/null
 . "$ENV_FILE"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CHECK_UPDATES="${CHECK_UPDATES:-$SCRIPT_DIR/../check_updates.py}"
+APTFLEET="${APTFLEET:-$SCRIPT_DIR/../aptfleet.py}"
 PYTHON="${PYTHON:-python3}"
-CHECK_ARGS="${CHECK_ARGS:---local --details}"
+APTFLEET_ARGS="${APTFLEET_ARGS:---local --details}"
 MAIL_TO="${MAIL_TO:-}"
 MAIL_WHEN="${MAIL_WHEN:-problems}"
 MAIL_TRANSPORT="${MAIL_TRANSPORT:-sendmail}"
@@ -38,13 +38,13 @@ REPORT_KEEP_DAYS="${REPORT_KEEP_DAYS:-30}"
 
 FQDN="$(hostname -f 2>/dev/null || hostname)"
 HOST="${REPORT_NAME:-$(hostname)}"
-MAIL_FROM="${MAIL_FROM:-updates-report@$FQDN}"
+MAIL_FROM="${MAIL_FROM:-aptfleet@$FQDN}"
 if [ "$DRY_RUN" = 1 ]; then
   MAIL_TRANSPORT=print
   MAIL_WHEN=always
 fi
 
-die() { echo "updates-report: $*" >&2; exit 5; }
+die() { echo "aptfleet-mail: $*" >&2; exit 5; }
 
 [ -n "$MAIL_TO" ] || [ "$MAIL_TRANSPORT" = print ] || die "MAIL_TO ist nicht gesetzt ($ENV_FILE)"
 case "$MAIL_WHEN" in always|problems) ;; *) die "MAIL_WHEN muss always oder problems sein" ;; esac
@@ -54,7 +54,7 @@ if [ "$MAIL_TRANSPORT" = smtp ]; then
   command -v curl >/dev/null || die "MAIL_TRANSPORT=smtp braucht curl"
 fi
 
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/updates-report.XXXXXX")" || die "mktemp fehlgeschlagen"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/aptfleet-mail.XXXXXX")" || die "mktemp fehlgeschlagen"
 trap 'rm -rf "$WORK"' EXIT
 
 STAMP="$(date +%Y-%m-%d_%H%M)"
@@ -62,9 +62,9 @@ HTML_NAME="updates-${HOST}-${STAMP}.html"
 HTML_FILE="$WORK/$HTML_NAME"
 TEXT_FILE="$WORK/report.txt"
 
-# CHECK_ARGS wird an Leerzeichen getrennt (Pfade mit Leerzeichen gehen also nicht).
-read -r -a args <<< "$CHECK_ARGS"
-"$PYTHON" "$CHECK_UPDATES" ${args[@]+"${args[@]}"} --no-progress --html "$HTML_FILE" \
+# APTFLEET_ARGS wird an Leerzeichen getrennt (Pfade mit Leerzeichen gehen also nicht).
+read -r -a args <<< "$APTFLEET_ARGS"
+"$PYTHON" "$APTFLEET" ${args[@]+"${args[@]}"} --no-progress --html "$HTML_FILE" \
   >"$TEXT_FILE" 2>&1 </dev/null
 rc=$?
 # Den Hinweis auf die (gleich gelöschte) temporäre HTML-Datei nicht mitschicken.
@@ -76,14 +76,14 @@ case "$rc" in
   1) status="Security-Updates oder offene KEV-Lücke" ;;
   2) status="FEHLER: Host nicht erreichbar oder Aufruffehler" ;;
   3) status="Prüfung unvollständig" ;;
-  *) status="FEHLER: check_updates.py endete mit Code $rc" ;;
+  *) status="FEHLER: aptfleet.py endete mit Code $rc" ;;
 esac
 
 if [ -n "$REPORT_DIR" ] && [ -f "$HTML_FILE" ]; then
   if mkdir -p "$REPORT_DIR" && cp "$HTML_FILE" "$REPORT_DIR/$HTML_NAME"; then
     find "$REPORT_DIR" -maxdepth 1 -name 'updates-*.html' -mtime "+$REPORT_KEEP_DAYS" -delete 2>/dev/null
   else
-    echo "updates-report: HTML-Report nicht in $REPORT_DIR ablegbar" >&2
+    echo "aptfleet-mail: HTML-Report nicht in $REPORT_DIR ablegbar" >&2
   fi
 fi
 
@@ -103,7 +103,7 @@ MSG="$WORK/message.eml"
   printf 'To: %s\n' "$MAIL_TO"
   printf 'Subject: %s\n' "$(encode_header "$MAIL_SUBJECT_PREFIX $HOST: $status")"
   printf 'Date: %s\n' "$(LC_ALL=C date '+%a, %d %b %Y %H:%M:%S %z')"
-  printf 'Message-ID: <updates-report.%s.%s@%s>\n' "$(date +%s)" "$$" "$FQDN"
+  printf 'Message-ID: <aptfleet.%s.%s@%s>\n' "$(date +%s)" "$$" "$FQDN"
   printf 'MIME-Version: 1.0\n'
   printf 'Auto-Submitted: auto-generated\n'
   printf 'Content-Type: multipart/mixed; boundary="%s"\n\n' "$BOUNDARY_MIXED"
@@ -142,7 +142,7 @@ case "$MAIL_TRANSPORT" in
   sendmail)
     # shellcheck disable=SC2086  # SENDMAIL darf Optionen enthalten
     $SENDMAIL -i -f "$MAIL_FROM" -- "${rcpts[@]}" < "$MSG" \
-      || { echo "updates-report: Versand per $SENDMAIL fehlgeschlagen" >&2; exit 4; }
+      || { echo "aptfleet-mail: Versand per $SENDMAIL fehlgeschlagen" >&2; exit 4; }
     ;;
   smtp)
     curl_args=(--silent --show-error --url "$SMTP_URL" --mail-from "$MAIL_FROM" --upload-file "$MSG")
@@ -154,10 +154,10 @@ case "$MAIL_TRANSPORT" in
       creds="${creds//\\/\\\\}"; creds="${creds//\"/\\\"}"
       printf 'user = "%s"\n' "$creds" \
         | curl "${curl_args[@]}" --config - \
-        || { echo "updates-report: SMTP-Versand an $SMTP_URL fehlgeschlagen" >&2; exit 4; }
+        || { echo "aptfleet-mail: SMTP-Versand an $SMTP_URL fehlgeschlagen" >&2; exit 4; }
     else
       curl "${curl_args[@]}" \
-        || { echo "updates-report: SMTP-Versand an $SMTP_URL fehlgeschlagen" >&2; exit 4; }
+        || { echo "aptfleet-mail: SMTP-Versand an $SMTP_URL fehlgeschlagen" >&2; exit 4; }
     fi
     ;;
 esac

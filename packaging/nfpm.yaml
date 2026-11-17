@@ -1,18 +1,18 @@
 # nfpm-Konfiguration für das .deb, gebaut mit `make package` (siehe Makefile).
-# Die Module bleiben flach in /usr/lib/updates-report (privates Verzeichnis, kein
+# Die Module bleiben flach in /usr/lib/aptfleet (privates Verzeichnis, kein
 # Python-Paket); /usr/bin enthält nur kleine Shims.
-name: updates-report
+name: aptfleet
 arch: all
 platform: linux
 version: ${VERSION}
 section: admin
 priority: optional
-maintainer: Michele Catalano <michele.catalano@mayflower.de>
+maintainer: Michele Catalano <michele@catalano.de>
 description: |
   Report über anstehende Ubuntu-Updates mit CVE- und CISA-KEV-Infos
-  check-updates prüft den eigenen Rechner (--local) oder Hosts per SSH auf
+  aptfleet prüft den eigenen Rechner (--local) oder Hosts per SSH auf
   anstehende deb-Updates, behobene CVEs, aktiv ausgenutzte Lücken (KEV) und
-  offene Lücken ohne Fix. updates-report verschickt den Report per Mail,
+  offene Lücken ohne Fix. aptfleet-mail verschickt den Report per Mail,
   z. B. täglich per Cronjob.
 
 depends:
@@ -26,40 +26,40 @@ suggests:
   - default-mta | mail-transport-agent
 
 contents:
-  # Modi wie im Repo: check_updates.py 0755, die übrigen Module 0644
+  # Modi wie im Repo: aptfleet.py 0755, die übrigen Module 0644
   - src: ./*.py
-    dst: /usr/lib/updates-report/
-  - src: ./cron/updates-report.sh
-    dst: /usr/lib/updates-report/cron/updates-report.sh
+    dst: /usr/lib/aptfleet/
+  - src: ./cron/aptfleet-mail.sh
+    dst: /usr/lib/aptfleet/cron/aptfleet-mail.sh
     file_info:
       mode: 0755
 
-  - src: ./packaging/check-updates
-    dst: /usr/bin/check-updates
+  - src: ./packaging/aptfleet
+    dst: /usr/bin/aptfleet
     file_info:
       mode: 0755
-  - src: ./packaging/updates-report
-    dst: /usr/bin/updates-report
+  - src: ./packaging/aptfleet-mail
+    dst: /usr/bin/aptfleet-mail
     file_info:
       mode: 0755
 
-  - src: ./cron/updates-report.env.sample
-    dst: /etc/updates-report.env
+  - src: ./cron/mail.env.sample
+    dst: /etc/aptfleet/mail.env
     type: config|noreplace
     file_info:
       mode: 0600
-  - src: ./packaging/updates-report.cron
-    dst: /etc/cron.d/updates-report
+  - src: ./packaging/aptfleet.cron
+    dst: /etc/cron.d/aptfleet
     type: config|noreplace
     file_info:
       mode: 0644
-  - dst: /etc/updates-report
+  - dst: /etc/aptfleet
     type: dir
     file_info:
       mode: 0755
 
   - src: ./README.md
-    dst: /usr/share/doc/updates-report/README.md
+    dst: /usr/share/doc/aptfleet/README.md
     file_info:
       mode: 0644
 

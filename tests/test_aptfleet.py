@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from check_updates import (
+from aptfleet import (
     SSH_CONFIG,
     default_path,
     exit_code,
@@ -27,7 +27,7 @@ from progress import Progress
 from remote import HostResult
 
 FIXTURES = Path(__file__).parent / "fixtures"
-SCRIPT = Path(__file__).resolve().parents[1] / "check_updates.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "aptfleet.py"
 INVENTORY_TEXT = "[ubuntu]\nrootserver-ansible\n#vpn-ansible\n\nwebserver-ansible\npdf-ansible\n"
 
 
@@ -176,7 +176,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(code, 2)
         hosts, ssh_config, refresh, packages, timeout = self.run_calls[0]
         self.assertEqual(hosts, ["rootserver-ansible", "webserver-ansible", "pdf-ansible"])
-        self.assertEqual(ssh_config, SSH_CONFIG)
+        self.assertEqual(ssh_config, resolve_ssh_config(None))
         self.assertTrue(refresh)
         self.assertEqual(packages, [])
         self.assertEqual(timeout, 120)
@@ -196,7 +196,7 @@ class MainTest(unittest.TestCase):
 
     def test_local_checks_own_host_without_inventory(self):
         self.inventory = Path(self._tmp.name) / "gibtsnicht"
-        with mock.patch("check_updates.socket.gethostname", return_value="myserver"):
+        with mock.patch("aptfleet.socket.gethostname", return_value="myserver"):
             code, out = self.run_main("--local", "--no-refresh")
         self.assertEqual(code, 1)
         hosts, ssh_config, refresh, _, _ = self.run_calls[0]
@@ -267,7 +267,7 @@ class MainTest(unittest.TestCase):
         self.assertIsNone(resolve_ssh_config(None, missing))
         self.assertEqual(resolve_ssh_config(missing, existing), missing)
 
-    def test_default_path_prefers_repo_then_etc(self):
+    def test_default_path_prefers_user_then_system(self):
         base = Path(self._tmp.name) / "default_path"
         base.mkdir()
         repo = base / "virtualhosts"

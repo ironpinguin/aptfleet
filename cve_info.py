@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 API_URL = "https://ubuntu.com/security/cves/{cve_id}.json"
-DEFAULT_CACHE_PATH = Path.home() / ".cache" / "updates_report" / "cves.json"
+DEFAULT_CACHE_PATH = Path.home() / ".cache" / "aptfleet" / "cves.json"
 CACHE_TTL_SECONDS = 7 * 24 * 3600
 FETCH_TIMEOUT = 10
 MAX_WORKERS = 8

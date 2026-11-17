@@ -41,7 +41,7 @@ Das Verzeichnis `updates_report/` irgendwohin kopieren und fertig:
 
 ```bash
 cp -r updates_report ~/tools/
-~/tools/updates_report/check_updates.py --help
+~/tools/updates_report/aptfleet.py --help
 ```
 
 ### Als .deb-Paket
@@ -52,28 +52,28 @@ vorher die Tests aus:
 
 ```bash
 cd updates_report
-make package                  # → dist/updates-report_1.0.0_all.deb
+make package                  # → dist/aptfleet-mail_1.0.0_all.deb
 make package VERSION=1.1.0    # andere Version
 ```
 
 Installieren:
 
 ```bash
-scp dist/updates-report_1.0.0_all.deb server:
-ssh server sudo apt install ./updates-report_1.0.0_all.deb
+scp dist/aptfleet-mail_1.0.0_all.deb server:
+ssh server sudo apt install ./aptfleet-mail_1.0.0_all.deb
 ```
 
 | Pfad | Inhalt |
 |---|---|
-| `/usr/bin/check-updates` | ruft `check_updates.py` auf, gleiche Optionen |
-| `/usr/bin/updates-report` | Cron-Wrapper mit Mailversand (siehe [Lokal per Cronjob](#lokal-per-cronjob)) |
-| `/usr/lib/updates-report/` | Module und `cron/updates-report.sh` |
-| `/etc/updates-report.env` | Konfiguration des Wrappers (conffile, Modus 0600) |
-| `/etc/cron.d/updates-report` | Cronjob, **auskommentiert**, bis `/etc/updates-report.env` angepasst ist |
-| `/etc/updates-report/` | optional `hosts.ini` und `ssh.conf` für den Betrieb per SSH (siehe [Defaults](#3-defaults)) |
+| `/usr/bin/aptfleet` | ruft `aptfleet.py` auf, gleiche Optionen |
+| `/usr/bin/aptfleet-mail` | Cron-Wrapper mit Mailversand (siehe [Lokal per Cronjob](#lokal-per-cronjob)) |
+| `/usr/lib/aptfleet/` | Module und `cron/aptfleet-mail.sh` |
+| `/etc/aptfleet/mail.env` | Konfiguration des Wrappers (conffile, Modus 0600) |
+| `/etc/cron.d/aptfleet` | Cronjob, **auskommentiert**, bis `/etc/aptfleet/mail.env` angepasst ist |
+| `/etc/aptfleet/` | optional `hosts.ini` und `ssh.conf` für den Betrieb per SSH (siehe [Defaults](#3-defaults)) |
 
 Die beiden Dateien unter `/etc` sind conffiles. Eigene Änderungen bleiben bei Updates
-erhalten, `apt purge updates-report` entfernt sie. Abhängigkeiten sind nur `python3` und
+erhalten, `apt purge aptfleet-mail` entfernt sie. Abhängigkeiten sind nur `python3` und
 `bash`. Empfohlen werden `ca-certificates` und `openssh-client`, für den Mailversand
 `curl` bzw. ein MTA.
 
@@ -88,8 +88,8 @@ Hosts direkt angeben. Es gilt die normale `~/.ssh/config` (Aliase, Keys, `ProxyJ
 außer es wird `--ssh-config` angegeben:
 
 ```bash
-./check_updates.py --user admin --host web1.example.com --host 10.0.0.12
-./check_updates.py --user ansiadm --host mein-alias-aus-ssh-config
+./aptfleet.py --user admin --host web1.example.com --host 10.0.0.12
+./aptfleet.py --user ansiadm --host mein-alias-aus-ssh-config
 ```
 
 ### 2. Eigenes Inventory: `--inventory` / `--ssh-config`
@@ -97,8 +97,8 @@ außer es wird `--ssh-config` angegeben:
 Inventory und SSH-Config können irgendwo liegen:
 
 ```bash
-./check_updates.py --inventory ~/etc/hosts.ini --ssh-config ~/etc/ssh_hosts.conf
-./check_updates.py --inventory ~/etc/hosts.ini     # SSH über ~/.ssh/config
+./aptfleet.py --inventory ~/etc/hosts.ini --ssh-config ~/etc/ssh_hosts.conf
+./aptfleet.py --inventory ~/etc/hosts.ini     # SSH über ~/.ssh/config
 ```
 
 Ohne `--ssh-config` wird die Default-Datei (siehe 3.) genutzt, falls sie existiert,
@@ -115,17 +115,17 @@ Ohne `--user` und `--inventory` liest das Skript zwei Dateien aus dem Verzeichni
 ├── virtualhosts                          # Inventory
 ├── ssh_config_rootserver_ansible.conf    # SSH-Config, wird per ssh -F genutzt
 └── updates_report/
-    └── check_updates.py
+    └── aptfleet.py
 ```
 
 Gibt es die Datei dort nicht (z. B. beim [.deb-Paket](#als-deb-paket)), gilt stattdessen
-`/etc/updates-report/hosts.ini` bzw. `/etc/updates-report/ssh.conf`.
+`/etc/aptfleet/hosts.ini` bzw. `/etc/aptfleet/ssh.conf`.
 
 Dann prüft ein Aufruf alle Hosts:
 
 ```bash
-./check_updates.py
-./check_updates.py --host host-b      # nur einer (muss im Inventory stehen)
+./aptfleet.py
+./aptfleet.py --host host-b      # nur einer (muss im Inventory stehen)
 ```
 
 Fehlt das Inventory, endet das Skript mit Exit-Code 2 und nennt `--inventory` bzw.
@@ -195,7 +195,7 @@ Der Login muss ohne Passwort-Abfrage klappen (Key, ggf. ssh-agent), da das Skrip
 ## Aufruf und Optionen
 
 ```bash
-./check_updates.py [Optionen]
+./aptfleet.py [Optionen]
 ```
 
 | Option | Wirkung |
@@ -203,8 +203,8 @@ Der Login muss ohne Passwort-Abfrage klappen (Key, ggf. ssh-agent), da das Skrip
 | `--local` | nur den eigenen Rechner prüfen, ohne SSH. Nicht kombinierbar mit `--host`, `--user`, `--inventory`, `--ssh-config` |
 | `--host NAME` | nur diesen Host prüfen, mehrfach möglich. Ohne `--user` muss der Name im Inventory stehen |
 | `--user NAME` | SSH-User. Nutzt die `--host`-Angaben direkt, ohne Inventory |
-| `--inventory PFAD` | Inventory-Datei (Default: `../virtualhosts`, sonst `/etc/updates-report/hosts.ini`) |
-| `--ssh-config PFAD` | SSH-Config für `ssh -F` (Default: `../ssh_config_rootserver_ansible.conf` bzw. `/etc/updates-report/ssh.conf`, falls vorhanden, sonst `~/.ssh/config`) |
+| `--inventory PFAD` | Inventory-Datei (Default: `../virtualhosts`, sonst `/etc/aptfleet/hosts.ini`) |
+| `--ssh-config PFAD` | SSH-Config für `ssh -F` (Default: `../ssh_config_rootserver_ansible.conf` bzw. `/etc/aptfleet/ssh.conf`, falls vorhanden, sonst `~/.ssh/config`) |
 | `--security-only` | nur Security-Updates anzeigen |
 | `--details` | neue Changelog-Einträge der Updates anzeigen. Holt auch CVE-Infos für offene Lücken |
 | `--package NAME` | nur dieses Binärpaket, mehrfach möglich |
@@ -218,11 +218,11 @@ Der Login muss ohne Passwort-Abfrage klappen (Key, ggf. ssh-agent), da das Skrip
 Beispiele:
 
 ```bash
-./check_updates.py --security-only
-./check_updates.py --host host-a --details
-./check_updates.py --package openssh-server --package sudo
-./check_updates.py --kev-recent 14
-./check_updates.py --details --html ~/reports/updates-$(date +%F).html
+./aptfleet.py --security-only
+./aptfleet.py --host host-a --details
+./aptfleet.py --package openssh-server --package sudo
+./aptfleet.py --kev-recent 14
+./aptfleet.py --details --html ~/reports/updates-$(date +%F).html
 ```
 
 Bis zu 6 Hosts werden parallel abgefragt. Die Ausgabe ist farbig, wenn sie in ein
@@ -347,26 +347,26 @@ heißt im Report wie `hostname`. Voraussetzung auf dem Server ist zusätzlich Py
 (bei Ubuntu vorinstalliert).
 
 ```bash
-sudo ./check_updates.py --local                 # als root: apt-get update ohne sudo
-./check_updates.py --local --no-refresh         # als normaler User
+sudo ./aptfleet.py --local                 # als root: apt-get update ohne sudo
+./aptfleet.py --local --no-refresh         # als normaler User
 ```
 
 Läuft das Skript als root, ruft es `apt-get update` direkt auf, sonst per `sudo -n`.
 
 ### Wrapper mit Mailversand
 
-`cron/updates-report.sh` ruft `check_updates.py` auf und verschickt das Ergebnis als
+`cron/aptfleet-mail.sh` ruft `aptfleet.py` auf und verschickt das Ergebnis als
 Mail: Textreport als Mailtext, HTML-Report als HTML-Ansicht der Mail und zusätzlich als
 Anhang. Der Betreff nennt Host und Ergebnis, z. B.
 `[updates] rootserver: Security-Updates oder offene KEV-Lücke`.
 
-Die Konfiguration steht in einer env-Datei (Vorlage: `cron/updates-report.env.sample`):
+Die Konfiguration steht in einer env-Datei (Vorlage: `cron/mail.env.sample`):
 
 | Variable | Wirkung | Default |
 |---|---|---|
-| `CHECK_ARGS` | Optionen für `check_updates.py` (`--no-progress`, `--html` setzt der Wrapper) | `--local --details` |
+| `APTFLEET_ARGS` | Optionen für `aptfleet.py` (`--no-progress`, `--html` setzt der Wrapper) | `--local --details` |
 | `MAIL_TO` | Empfänger, mehrere mit Komma | – (Pflicht) |
-| `MAIL_FROM` | Absender | `updates-report@<hostname -f>` |
+| `MAIL_FROM` | Absender | `aptfleet@<hostname -f>` |
 | `MAIL_WHEN` | `problems`: nur bei Exit-Code ≠ 0, `always`: bei jedem Lauf | `problems` |
 | `MAIL_TRANSPORT` | `sendmail` (lokaler MTA), `smtp` (direkt per `curl`), `print` (nur ausgeben) | `sendmail` |
 | `MAIL_HTML_INLINE` | `1`: HTML als Mailinhalt, `0`: nur als Anhang | `1` |
@@ -378,13 +378,13 @@ Die Konfiguration steht in einer env-Datei (Vorlage: `cron/updates-report.env.sa
 | `REPORT_NAME` | Hostname in Betreff und Dateiname | `hostname` |
 | `REPORT_DIR` | HTML-Reports zusätzlich hier archivieren | – |
 | `REPORT_KEEP_DAYS` | ältere Reports in `REPORT_DIR` löschen | `30` |
-| `CHECK_UPDATES`, `PYTHON` | Pfad zu `check_updates.py` bzw. Interpreter | `../check_updates.py`, `python3` |
+| `APTFLEET`, `PYTHON` | Pfad zu `aptfleet.py` bzw. Interpreter | `../aptfleet.py`, `python3` |
 
 `MAIL_TRANSPORT=smtp` braucht `curl`, aber keinen MTA auf dem Server. Der Wrapper geht
-auch ohne `--local`, also für den zentralen Betrieb per SSH (`CHECK_ARGS` mit
+auch ohne `--local`, also für den zentralen Betrieb per SSH (`APTFLEET_ARGS` mit
 `--inventory` …).
 
-Exit-Code des Wrappers: der von `check_updates.py`, `4` wenn der Mailversand scheitert,
+Exit-Code des Wrappers: der von `aptfleet.py`, `4` wenn der Mailversand scheitert,
 `5` bei Konfigurationsfehlern. Fehlermeldungen gehen auf stderr, also per cron-Mail an
 `MAILTO`.
 
@@ -394,39 +394,39 @@ Mit dem [.deb-Paket](#als-deb-paket) liegen Wrapper, env-Datei und Cronjob schon
 und Stelle:
 
 ```bash
-sudoedit /etc/updates-report.env                 # MAIL_TO, Versandweg …
-sudo updates-report --dry-run | less             # Testlauf, verschickt nichts
-sudoedit /etc/cron.d/updates-report              # Cron-Zeile einkommentieren
+sudoedit /etc/aptfleet/mail.env                 # MAIL_TO, Versandweg …
+sudo aptfleet-mail --dry-run | less             # Testlauf, verschickt nichts
+sudoedit /etc/cron.d/aptfleet              # Cron-Zeile einkommentieren
 ```
 
 Ohne Paket:
 
 ```bash
 sudo cp -r updates_report /opt/
-sudo cp /opt/updates_report/cron/updates-report.env.sample /etc/updates-report.env
-sudo chmod 600 /etc/updates-report.env
-sudoedit /etc/updates-report.env                 # MAIL_TO, Versandweg …
+sudo cp /opt/aptfleet/cron/mail.env.sample /etc/aptfleet/mail.env
+sudo chmod 600 /etc/aptfleet/mail.env
+sudoedit /etc/aptfleet/mail.env                 # MAIL_TO, Versandweg …
 
 # Testlauf: Mail immer erzeugen und nur ausgeben statt verschicken
-sudo /opt/updates_report/cron/updates-report.sh --dry-run /etc/updates-report.env | less
+sudo /opt/aptfleet/cron/aptfleet-mail.sh --dry-run /etc/aptfleet/mail.env | less
 
-sudo cp /opt/updates_report/cron/updates-report.cron /etc/cron.d/updates-report
+sudo cp /opt/aptfleet/cron/aptfleet.cron /etc/cron.d/aptfleet
 ```
 
-`cron/updates-report.cron` startet den Wrapper täglich um 06:30 als root. Aufruf:
-`updates-report.sh [--dry-run] [ENV-DATEI]`, ohne Angabe gilt `/etc/updates-report.env`.
+`cron/aptfleet.cron` startet den Wrapper täglich um 06:30 als root. Aufruf:
+`aptfleet-mail.sh [--dry-run] [ENV-DATEI]`, ohne Angabe gilt `/etc/aptfleet/mail.env`.
 
 ## Datenquellen und Cache
 
 | Quelle | Wofür | Cache | gültig |
 |---|---|---|---|
-| `ubuntu.com/security/cves/<id>.json` | Priorität/Beschreibung einzelner CVEs | `~/.cache/updates_report/cves.json` | 7 Tage |
-| CISA KEV-Feed (JSON) | aktiv ausgenutzte CVEs | `~/.cache/updates_report/kev.json` | 24 h |
-| Ubuntu-OVAL (`security-metadata.canonical.com`) | offene Lücken je Release | `~/.cache/updates_report/oval-<codename>.json` | 24 h |
+| `ubuntu.com/security/cves/<id>.json` | Priorität/Beschreibung einzelner CVEs | `~/.cache/aptfleet/cves.json` | 7 Tage |
+| CISA KEV-Feed (JSON) | aktiv ausgenutzte CVEs | `~/.cache/aptfleet/kev.json` | 24 h |
+| Ubuntu-OVAL (`security-metadata.canonical.com`) | offene Lücken je Release | `~/.cache/aptfleet/oval-<codename>.json` | 24 h |
 
 Ist eine Quelle nicht erreichbar, wird ein vorhandener älterer Cache genutzt. Der Report
 gibt dann einen Hinweis mit dem Datenstand aus. Ohne jeden Cache fehlt der jeweilige
-Teil, und der Exit-Code ist 3. Cache leeren: `rm -rf ~/.cache/updates_report`.
+Teil, und der Exit-Code ist 3. Cache leeren: `rm -rf ~/.cache/aptfleet`.
 
 ## Tests
 
@@ -441,7 +441,7 @@ python3 -m unittest discover -s tests -t .
 
 | Modul | Aufgabe |
 |---|---|
-| `check_updates.py` | CLI, Inventory, Ablaufsteuerung, Exit-Code |
+| `aptfleet.py` | CLI, Inventory, Ablaufsteuerung, Exit-Code |
 | `remote.py` | SSH- bzw. lokaler Aufruf und Remote-Skript (Abschnitte `===SECTION …===`) |
 | `progress.py` | Fortschrittsanzeige auf stderr (nur im Terminal) |
 | `parsing.py` | Remote-Ausgabe in `HostReport`s zerlegen |
@@ -452,5 +452,5 @@ python3 -m unittest discover -s tests -t .
 | `vulns.py` | offene Lücken aus installierten Paketen und OVAL ermitteln |
 | `render.py` | Textausgabe und gemeinsame Aufbereitung (Sortierung, Übersicht, Zusammenfassung) |
 | `render_html.py` | HTML-Report (`--html`) |
-| `cron/updates-report.sh` | Cron-Wrapper: Report erzeugen und per Mail verschicken |
+| `cron/aptfleet-mail.sh` | Cron-Wrapper: Report erzeugen und per Mail verschicken |
 | `packaging/`, `Makefile` | .deb-Paket (nfpm-Konfiguration, Shims, Cronjob, Maintainer-Skripte) |

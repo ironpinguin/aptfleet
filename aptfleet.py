@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import os
 import socket
 import sys
 from pathlib import Path
@@ -19,18 +20,18 @@ from render import render_report
 from render_html import render_html_report
 from vulns import find_open_vulns
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-CONFIG_DIR = Path("/etc/updates-report")
+USER_CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "aptfleet"
+SYSTEM_CONFIG_DIR = Path("/etc/aptfleet")
 DEFAULT_TIMEOUT = 120
 
 
-def default_path(repo: Path, etc: Path) -> Path:
-    """Datei aus dem Repo (Checkout), sonst aus /etc (installiertes Paket)."""
-    return repo if repo.is_file() else etc
+def default_path(user: Path, system: Path) -> Path:
+    """Datei aus der User-Config, sonst aus /etc/aptfleet."""
+    return user if user.is_file() else system
 
 
-INVENTORY = default_path(REPO_ROOT / "virtualhosts", CONFIG_DIR / "hosts.ini")
-SSH_CONFIG = default_path(REPO_ROOT / "ssh_config_rootserver_ansible.conf", CONFIG_DIR / "ssh.conf")
+INVENTORY = default_path(USER_CONFIG_DIR / "hosts.ini", SYSTEM_CONFIG_DIR / "hosts.ini")
+SSH_CONFIG = default_path(USER_CONFIG_DIR / "ssh.conf", SYSTEM_CONFIG_DIR / "ssh.conf")
 
 
 def read_inventory(path: Path) -> list[str]:
@@ -61,7 +62,7 @@ def select_hosts(inventory: list[str], requested: list[str]) -> list[str]:
 
 
 def resolve_ssh_config(explicit: Path | None, default: Path = SSH_CONFIG) -> Path | None:
-    """Ohne explizite Angabe die Repo-SSH-Config, falls vorhanden; sonst gilt ~/.ssh/config."""
+    """Ohne explizite Angabe ssh.conf aus der aptfleet-Config, falls vorhanden; sonst gilt ~/.ssh/config."""
     if explicit is not None:
         return explicit
     return default if default.is_file() else None

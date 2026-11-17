@@ -12,7 +12,7 @@ from pathlib import Path
 from cve_info import _default_ssl_context
 
 KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
-DEFAULT_CACHE_PATH = Path.home() / ".cache" / "updates_report" / "kev.json"
+DEFAULT_CACHE_PATH = Path.home() / ".cache" / "aptfleet" / "kev.json"
 CACHE_TTL_SECONDS = 24 * 3600
 FETCH_TIMEOUT = 30
 

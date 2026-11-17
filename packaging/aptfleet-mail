@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/lib/aptfleet/cron/aptfleet-mail.sh "$@"

@@ -1,2 +1,0 @@
-#!/bin/sh
-exec /usr/lib/updates-report/cron/updates-report.sh "$@"

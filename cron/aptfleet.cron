@@ -1,5 +1,5 @@
-# Beispiel für /etc/cron.d/updates-report
-#   cp cron/updates-report.cron /etc/cron.d/updates-report
+# Beispiel für /etc/cron.d/aptfleet
+#   cp cron/aptfleet.cron /etc/cron.d/aptfleet
 # Dateien in /etc/cron.d brauchen eine User-Spalte und dürfen keinen Punkt im Namen haben.
 
 SHELL=/bin/bash
@@ -9,7 +9,7 @@ MAILTO=root
 
 # Täglich um 06:30 als root (apt-get update ohne sudo). Den Report verschickt der Wrapper selbst.
 # Der Exit-Code des Wrappers ist für cron egal, daher "|| true" nicht nötig.
-30 6 * * *  root  /opt/updates_report/cron/updates-report.sh /etc/updates-report.env
+30 6 * * *  root  /opt/aptfleet/cron/aptfleet-mail.sh /etc/aptfleet/mail.env
 
-# Variante ohne root: eigener User, Paketlisten aus apt-daily (CHECK_ARGS mit --no-refresh)
-#30 6 * * *  updates  /opt/updates_report/cron/updates-report.sh /home/updates/updates-report.env
+# Variante ohne root: eigener User, Paketlisten aus apt-daily (APTFLEET_ARGS mit --no-refresh)
+#30 6 * * *  updates  /opt/aptfleet/cron/aptfleet-mail.sh /home/updates/aptfleet-mail.env
